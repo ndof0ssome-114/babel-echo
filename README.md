@@ -7,7 +7,7 @@
 本文件同时是**开发者交接文档**。如果你是一个接手继续开发的 AI（Codex 等），
 **请先读 §3「接手须知」**，那里列了不要破坏的不变量和已经踩过的坑。
 
-**当前版本：`0.1.0-beta.2`。** 仅用于私有测试，尚未发布正式版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
+**当前版本：`0.1.0-beta.3`。** 仅用于私有测试，尚未发布正式版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
 
 品牌图标根据项目使用者提供的角色参考图生成，源图与各尺寸图标见 `desktop/build/`。本仓库未授予第三方复用该角色或图标的许可；若将来公开发布，需先确认参考角色的使用授权。
 
@@ -120,9 +120,11 @@ npm start
 
 ```powershell
 cd desktop
-npm run dist              # → ../dist/BabelEcho-0.1.0-beta.2-portable.exe（单文件）
-npm run dist:installer    # → NSIS 安装包
+npm run dist              # → ../dist/BabelEcho-0.1.0-beta.3-setup.exe（安装向导）
+npm run dist:portable     # → ../dist/BabelEcho-0.1.0-beta.3-portable.exe（单文件）
 ```
+
+安装版会弹出向导，选择安装范围和目录后再安装；已有安装升级时沿用原目录。卸载会先确认，再询问是否保留本机会议录音、转写、存档和设置，默认保留；选择删除才会在卸载完成后移除当前用户的应用数据（包括 API Key）。静默卸载和版本升级始终保留数据。
 
 单文件 portable exe 每次启动会先解压 Electron，适合临时携带。经常使用时建议安装版，或将 `win-unpacked` 文件夹解压一次后直接运行其中的 `巴别回声.exe`。空载启动不会扫描麦克风；打开麦克风下拉框或点击「刷新设备」时才读取设备列表。
 
@@ -1188,8 +1190,8 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
 
 | 命令 | 产物 | 大小 |
 | --- | --- | --- |
-| `npm run dist` | `dist/BabelEcho-0.1.0-beta.2-portable.exe` | ~100MB |
-| `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.2-setup.exe` | — |
+| `npm run dist` / `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.3-setup.exe` | — |
+| `npm run dist:portable` | `dist/BabelEcho-0.1.0-beta.3-portable.exe` | ~100MB |
 | `npm run dist:dir` | `dist/win-unpacked/`（免安装目录） | ~368MB |
 
 打包时 `server.mjs` / `lib/` / `public/` 作为 `extraResources` 进 `resources/`，

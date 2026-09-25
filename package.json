@@ -1,6 +1,6 @@
 {
   "name": "babel-echo",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "private": true,
   "type": "module",
   "description": "巴别回声 — AI 会议记录工作台：实时转写 / 实时总结 / 智能纪要 / 逐句翻译 / 会议问答",

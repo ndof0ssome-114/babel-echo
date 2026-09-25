@@ -1,6 +1,6 @@
 {
   "name": "babel-echo-desktop",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "private": true,
   "description": "巴别回声 桌面版（Electron 外壳）",
   "main": "main.cjs",
@@ -9,8 +9,9 @@
     "dev": "electron . --dev",
     "test": "electron . --selftest",
     "capture": "electron . --capture=../.probe/desktop.png",
-    "dist": "electron-builder --win portable",
+    "dist": "electron-builder --win nsis",
     "dist:installer": "electron-builder --win nsis",
+    "dist:portable": "electron-builder --win portable",
     "dist:dir": "electron-builder --win --dir"
   },
   "devDependencies": {
@@ -50,14 +51,18 @@
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        "portable"
+        "nsis"
       ]
     },
     "portable": {
       "artifactName": "BabelEcho-${version}-portable.exe"
     },
     "nsis": {
-      "artifactName": "BabelEcho-${version}-setup.exe"
+      "artifactName": "BabelEcho-${version}-setup.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
     }
   },
   "author": "巴别回声"
