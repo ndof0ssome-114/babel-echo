@@ -6,7 +6,7 @@
 
 **Turn meeting audio into notes you can revisit.** Babel Echo is a Windows AI meeting workspace that can capture your microphone and computer audio together, transcribe as you record, and generate summaries, minutes, and translations.
 
-**当前版本 / Current version:** `0.1.0-beta.3` · 私有测试 / private beta
+**当前版本 / Current version:** `0.1.0-beta.3` · 公开测试版 / public beta · [下载 / Download](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3)
 
 [简体中文](#简体中文) · [English](#english) · [开发者与 AI 接手文档 / Developer & AI guide](README_AI.md)
 
@@ -24,7 +24,7 @@
 
 ### 开始使用
 
-**安装版：** 测试者取得安装包后，运行 `BabelEcho-0.1.0-beta.3-setup.exe`，在向导中选择安装范围和目录。首次录音前：
+**安装版：** 从 [预发布页面](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3) 下载 `BabelEcho-0.1.0-beta.3-setup.exe`，在向导中选择安装范围和目录。安装包目前未签名。首次录音前：
 
 1. 打开「设置」，配置语音识别和文本模型；使用云端服务时填写相应的 API Key。若使用本地模型，请先自行启动模型服务并加载模型。
 2. 选择识别语言与麦克风，点击「测试麦克风」确认有输入。需要录入会议播放声时，勾选「同时录电脑声音」。
@@ -68,7 +68,7 @@ npm start
 
 ### Get started
 
-**Installer:** If you have the private beta installer, run `BabelEcho-0.1.0-beta.3-setup.exe` and choose the installation scope and directory. Before recording:
+**Installer:** Download `BabelEcho-0.1.0-beta.3-setup.exe` from the [prerelease page](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3), then choose the installation scope and directory. The installer is currently unsigned. Before recording:
 
 1. Open Settings and configure speech and text models. Add API keys for cloud providers. For local models, start the service and load the model yourself.
 2. Choose the recognition language and microphone, then use **Test microphone** to check the input. Enable **Capture computer audio** if you also need meeting playback.
