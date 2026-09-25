@@ -1,0 +1,25 @@
+data/
+.probe/
+node_modules/
+config.json
+dist/
+*.log
+*.tmp
+*.bak
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+credentials.json
+**/credentials.json
+**/meetings/
+**/audio/
+**/uploads/
+**/tmp/
+
+# Electron build artifacts
+desktop/dist/
+desktop/node_modules/

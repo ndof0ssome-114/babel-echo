@@ -1,0 +1,61 @@
+{
+  "name": "miaoji-desktop",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "description": "妙记 桌面版（Electron 外壳）",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "electron . --selftest",
+    "capture": "electron . --capture=../.probe/desktop.png",
+    "dist": "electron-builder --win portable",
+    "dist:installer": "electron-builder --win nsis",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.miaoji.desktop",
+    "productName": "Miaoji",
+    "directories": {
+      "output": "../dist"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "build/icon.png",
+      "build/icon.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "../server.mjs",
+        "to": "server.mjs"
+      },
+      {
+        "from": "../lib",
+        "to": "lib"
+      },
+      {
+        "from": "../public",
+        "to": "public"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "Miaoji-${version}-portable.exe"
+    }
+  },
+  "author": "妙记"
+}

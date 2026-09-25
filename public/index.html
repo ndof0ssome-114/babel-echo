@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>妙记 — AI 会议记录工作台</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">妙</span>
+      <span class="brand-text">
+        <b>妙记</b>
+        <i data-i18n="AI 会议记录工作台">AI 会议记录工作台</i>
+      </span>
+    </div>
+
+    <input id="title" class="title-input" value="未命名会议" spellcheck="false" title="点击修改会议标题">
+
+    <span class="timer" id="timer">00:00</span>
+    <span class="pill" id="statePill" data-state="idle" data-i18n="待机">待机</span>
+
+    <span class="grow"></span>
+
+    <span class="chip" id="engineChip" title="当前语音识别引擎">未就绪</span>
+    <label class="ui-language" title="界面语言"><span data-i18n="界面语言">界面语言</span><select id="uiLanguage" aria-label="界面语言"><option value="zh">简体中文</option><option value="ja">日本語</option><option value="en">English</option></select></label>
+    <button class="btn ghost" id="btnHistory" data-i18n="历史">历史</button>
+    <button class="btn ghost" id="btnSettings" data-i18n="设置">设置</button>
+    <button class="btn ghost icon" id="btnTheme" title="切换主题">◐</button>
+  </header>
+
+  <section class="controls" aria-label="录音控制">
+    <div class="capture-actions">
+      <div class="capture-actions-primary">
+        <button class="btn primary" id="btnRecord" data-i18n="开始录音">开始录音</button>
+        <button class="btn" id="btnPause" disabled data-i18n="暂停">暂停</button>
+        <button class="btn danger" id="btnStop" disabled data-i18n="结束并生成纪要">结束并生成纪要</button>
+      </div>
+      <span class="capture-actions-divider" aria-hidden="true"></span>
+      <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
+      <button class="btn" id="btnUpload" data-i18n="上传音视频">上传音视频</button>
+    </div>
+    <div class="capture-options">
+    <label class="field">
+      <span data-i18n="识别语言">识别语言</span>
+      <select id="language">
+        <option value="auto" data-i18n="自动检测">自动检测</option>
+        <option value="zh" data-i18n="中文">中文</option>
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+        <option value="ko" data-i18n="韩语">韩语</option>
+        <option value="fr" data-i18n="法语">法语</option>
+        <option value="de" data-i18n="德语">德语</option>
+        <option value="es" data-i18n="西班牙语">西班牙语</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span data-i18n="翻译为">翻译为</span>
+      <select id="translateTo">
+        <option value="" data-i18n="不翻译">不翻译</option>
+        <option value="ja">日本語</option>
+        <option value="zh" data-i18n="简体中文">简体中文</option>
+        <option value="en">English</option>
+        <option value="ko" data-i18n="韩语">韩语</option>
+        <option value="fr" data-i18n="法语">法语</option>
+        <option value="de" data-i18n="德语">德语</option>
+        <option value="es" data-i18n="西班牙语">西班牙语</option>
+      </select>
+    </label>
+
+    <label class="field microphone-field">
+      <span data-i18n="麦克风">麦克风</span>
+      <select id="microphone" aria-label="选择麦克风">
+        <option value="default" data-i18n="系统默认麦克风">系统默认麦克风</option>
+      </select>
+    </label>
+    <button class="btn tiny" id="btnRefreshMicrophones" title="授权并刷新麦克风列表" data-i18n="刷新设备">刷新设备</button>
+    <button class="btn tiny" id="btnTestMicrophone" title="录音前检查所选麦克风是否有声音" data-i18n="测试麦克风">测试麦克风</button>
+    <label class="field" id="systemAudioField" title="同时录入电脑扬声器正在播放的声音"><input type="checkbox" id="includeSystemAudio"> <span data-i18n="同时录电脑声音">同时录电脑声音</span></label>
+    <span class="muted small" id="microphoneStatus" role="status"></span>
+
+    </div>
+  </section>
+
+  <div class="banner" id="banner" role="status" aria-live="polite" hidden></div>
+
+  <main class="layout">
+
+    <section class="pane">
+      <div class="pane-head">
+        <h2 data-i18n="实时转写">实时转写</h2>
+        <span class="muted" id="segCount">0 条</span>
+        <span class="grow"></span>
+        <button class="btn tiny" id="btnResplitHead" title="用语言线索推断不同说话人" data-i18n="AI 分角色">AI 分角色</button>
+        <span class="muted small" id="levelHint"></span>
+      </div>
+
+      <div class="meter"><canvas id="meter"></canvas></div>
+
+      <div class="player" id="playerWrap" hidden>
+        <audio id="player" controls preload="metadata"></audio>
+      </div>
+
+      <div class="transcript" id="transcript">
+        <div class="empty" id="transcriptEmpty">
+          <p data-i18n="还没有转写内容。">还没有转写内容。</p>
+          <p class="muted" data-i18n="点击「开始录音」实时转写，或上传一段音视频文件。">点击「开始录音」实时转写，或上传一段音视频文件。</p>
+        </div>
+      </div>
+    </section>
+
+    <aside class="pane side">
+      <nav class="tabs" id="tabs">
+        <button data-tab="summary" class="active" data-i18n="实时摘要">实时摘要</button>
+        <button data-tab="minutes" data-i18n="智能纪要">智能纪要</button>
+        <button data-tab="ask" data-i18n="问答">问答</button>
+        <button data-tab="stats" data-i18n="统计">统计</button>
+      </nav>
+
+      <div class="tab-body">
+
+        <div class="tab-panel active" data-panel="summary">
+          <div class="panel-bar">
+            <span class="muted small" id="summaryMeta" data-i18n="尚未生成">尚未生成</span>
+            <span class="grow"></span>
+            <button class="btn tiny" id="btnResummarize" data-i18n="重新总结">重新总结</button>
+          </div>
+          <div class="markdown" id="summaryBody"><p class="muted" data-i18n="会议开始后，摘要会每隔一段时间自动刷新。">会议开始后，摘要会每隔一段时间自动刷新。</p></div>
+        </div>
+
+        <div class="tab-panel" data-panel="minutes">
+          <div class="panel-bar">
+            <span class="muted small" id="minutesMeta" data-i18n="尚未生成">尚未生成</span>
+            <span class="grow"></span>
+            <button class="btn tiny" id="btnMinutes" data-i18n="生成纪要">生成纪要</button>
+          </div>
+          <div id="minutesBody"><p class="muted" data-i18n="结束录音时会自动生成结构化纪要，也可以随时手动生成。">结束录音时会自动生成结构化纪要，也可以随时手动生成。</p></div>
+        </div>
+
+        <div class="tab-panel" data-panel="ask">
+          <div class="qa-log" id="qaLog"><p class="muted" data-i18n="基于本次会议的全部转写内容提问，回答会标注出处时间。">基于本次会议的全部转写内容提问，回答会标注出处时间。</p></div>
+          <form class="qa-form" id="qaForm">
+            <input id="qaInput" placeholder="例如：谁负责预算表？什么时候截止？" data-i18n-placeholder="例如：谁负责预算表？什么时候截止？" autocomplete="off">
+            <button class="btn primary tiny" type="submit" data-i18n="提问">提问</button>
+          </form>
+        </div>
+
+        <div class="tab-panel" data-panel="stats">
+          <dl class="stats" id="statsList"></dl>
+          <div class="panel-bar">
+            <span class="grow"></span>
+            <button class="btn tiny" id="btnResplit" data-i18n="AI 分角色">AI 分角色</button>
+          </div>
+          <div id="speakerList" class="speakers"></div>
+        </div>
+
+      </div>
+    </aside>
+  </main>
+
+  <footer class="statusbar">
+    <span id="connState" class="dot" data-state="off" data-i18n="连接中…">连接中…</span>
+    <span class="grow"></span>
+    <span class="muted small" id="exportBar">
+      <span data-i18n="导出：">导出：</span>
+      <a href="#" data-export="md">Markdown</a>
+      <a href="#" data-export="vtt" data-i18n="字幕 VTT">字幕 VTT</a>
+      <a href="#" data-export="vtt&translated=1" data-i18n="双语字幕">双语字幕</a>
+      <a href="#" data-export="txt" data-i18n="纯文本">纯文本</a>
+      <a href="#" data-export="json">JSON</a>
+    </span>
+  </footer>
+</div>
+
+<div class="drawer" id="drawer" hidden>
+  <div class="drawer-card">
+    <header>
+      <h3 id="drawerTitle">会议历史</h3>
+      <button class="btn ghost icon" id="drawerClose" aria-label="关闭">×</button>
+    </header>
+    <div class="drawer-body" id="drawerBody"></div>
+  </div>
+</div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

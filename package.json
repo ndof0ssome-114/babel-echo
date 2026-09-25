@@ -1,0 +1,25 @@
+{
+  "name": "miaoji",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "type": "module",
+  "description": "妙记 — AI 会议记录工作台：实时转写 / 实时总结 / 智能纪要 / 逐句翻译 / 会议问答",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "app": "powershell -ExecutionPolicy Bypass -File ./start-app.ps1",
+    "desktop:install": "npm --prefix desktop install",
+    "desktop:start": "npm --prefix desktop start",
+    "desktop:test": "npm --prefix desktop test",
+    "desktop:dist": "npm --prefix desktop run dist",
+    "fixture": "node scripts/make-fixture.mjs",
+    "test:adapters": "node scripts/test-adapters.mjs",
+    "test:regressions": "node scripts/test-regressions.mjs",
+    "test:local-access": "node scripts/test-local-access.mjs",
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:import": "node scripts/test-import.mjs"
+  }
+}
