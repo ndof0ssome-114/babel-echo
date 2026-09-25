@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// server.mjs — HTTP + WebSocket host for 妙记.
+// server.mjs — HTTP + WebSocket host for 巴别回声.
 //
 // No framework, no build step: node:http serves the static client and a tiny
 // JSON API, and lib/ws.mjs speaks WebSocket for the realtime path. Audio
@@ -626,7 +626,7 @@ attachWebSocket(server, {
 const requestedPort = Number(process.env.MIAOJI_PORT || process.argv[2] || config.server.port);
 const host = process.env.MIAOJI_HOST || config.server.host;
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) {
-  throw new Error('妙记测试版只能监听本机回环地址（127.0.0.1、localhost 或 ::1）');
+  throw new Error('巴别回声测试版只能监听本机回环地址（127.0.0.1、localhost 或 ::1）');
 }
 
 server.listen(requestedPort, host, () => {
@@ -641,7 +641,7 @@ server.listen(requestedPort, host, () => {
     cwd: process.cwd(),
   }));
   console.log('');
-  console.log('  妙记 Miaoji — AI 会议记录工作台');
+  console.log('  巴别回声 Babel Echo — AI 会议记录工作台');
   console.log('  ' + url);
   console.log('');
   console.log('  语音识别:');

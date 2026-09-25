@@ -3,6 +3,7 @@
 export const LANGUAGES = { zh: '简体中文', ja: '日本語', en: 'English' };
 
 const en = {
+  '巴别回声': 'Babel Echo',
   'AI 会议记录工作台': 'AI meeting workspace', '未命名会议': 'Untitled meeting',
   '待机': 'Ready', '录音中': 'Recording', '已暂停': 'Paused', '处理中': 'Processing', '已结束': 'Finished',
   '历史': 'History', '设置': 'Settings', '界面语言': 'Interface', '识别语言': 'Speech language',
@@ -74,6 +75,7 @@ const en = {
 };
 
 const ja = {
+  '巴别回声': 'バベルエコー',
   'AI 会议记录工作台': 'AI 会議記録ワークスペース', '未命名会议': '無題の会議',
   '待机': '待機中', '录音中': '録音中', '已暂停': '一時停止', '处理中': '処理中', '已结束': '終了',
   '历史': '履歴', '设置': '設定', '界面语言': '表示言語', '识别语言': '認識言語',

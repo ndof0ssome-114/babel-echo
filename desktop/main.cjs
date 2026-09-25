@@ -1,4 +1,4 @@
-// main.cjs — Electron main process for 妙记.
+// main.cjs — Electron main process for 巴别回声.
 //
 // The desktop build keeps the existing local HTTP server and just gives it a
 // native shell, which means one code path for the whole product. What the
@@ -44,10 +44,15 @@ const argValue = (name) => {
 const CAPTURE = argValue('capture');
 const OPEN_QUERY = argValue('open');
 // Self-tests need their own Chromium profile and can run while the user's
-// normal Miaoji window remains open.
+// normal 巴别回声 window remains open.
 if (SELFTEST || CAPTURE) {
   const qaProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'miaoji-qa-'));
   app.setPath('userData', qaProfile);
+} else {
+  // Keep the pre-rename profile so meetings, keys and local UI settings survive.
+  const legacyProfile = path.join(app.getPath('appData'), 'miaoji-desktop');
+  fs.mkdirSync(legacyProfile, { recursive: true });
+  app.setPath('userData', legacyProfile);
 }
 // Mutable state must not live inside the install directory.
 const DATA_DIR = app.isPackaged ? path.join(app.getPath('userData'), 'data') : path.join(ROOT, 'data');
@@ -142,7 +147,7 @@ function startServer() {
         reject(new Error('后台服务启动失败（退出码 ' + code + '）'));
         return;
       }
-      dialog.showErrorBox('妙记后台服务已停止',
+      dialog.showErrorBox('巴别回声后台服务已停止',
         '本地服务意外退出（退出码 ' + code + '），应用即将关闭。\n已完成的会议记录都保存在磁盘上。');
       quitting = true;
       app.quit();
@@ -167,7 +172,7 @@ function createWindow() {
     height: 940,
     minWidth: 1024,
     minHeight: 640,
-    title: '妙记',
+    title: '巴别回声',
     icon: fs.existsSync(ICON_PNG) ? ICON_PNG : undefined,
     backgroundColor: '#f6f7f9',
     show: false,
@@ -210,7 +215,7 @@ function createWindow() {
     if (!quitting && live.recording) {
       e.preventDefault();
       win.hide();
-      notify('妙记仍在录音', '窗口已收进托盘，会议继续记录。要完全退出请右键托盘图标。');
+      notify('巴别回声仍在录音', '窗口已收进托盘，会议继续记录。要完全退出请右键托盘图标。');
     }
   });
 
@@ -255,16 +260,16 @@ function createTray() {
 function updateTray() {
   if (!tray) return;
   const rec = live.recording;
-  tray.setToolTip(rec ? '妙记 · 正在录音' : '妙记 · 待机');
+  tray.setToolTip(rec ? '巴别回声 · 正在录音' : '巴别回声 · 待机');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '打开妙记窗口', click: showWindow },
+    { label: '打开巴别回声窗口', click: showWindow },
     { type: 'separator' },
     { label: rec ? '停止录音并生成纪要' : '开始录音', click: () => sendToRenderer('miaoji:toggle-record') },
     { label: '导入音视频文件…', click: () => sendToRenderer('miaoji:import') },
     { type: 'separator' },
     { label: '数据文件夹', click: () => shell.openPath(DATA_DIR) },
     { type: 'separator' },
-    { label: '退出妙记', click: () => { quitting = true; app.quit(); } },
+    { label: '退出巴别回声', click: () => { quitting = true; app.quit(); } },
   ]));
 }
 
@@ -296,7 +301,7 @@ async function pollLive() {
     if (!!next.recording !== !!live.recording) {
       live = next;
       updateTray();
-      if (win && !win.isDestroyed()) win.setTitle((next.recording ? '● ' : '') + '妙记');
+      if (win && !win.isDestroyed()) win.setTitle((next.recording ? '● ' : '') + '巴别回声');
 
       // A two-hour meeting must not be interrupted by the screen going to
       // sleep, so hold a wake lock for exactly as long as we are recording.
@@ -316,7 +321,7 @@ async function pollLive() {
       if (m.hasMinutes && !alreadyNotified.has(m.id)) {
         alreadyNotified.add(m.id);
         if (!win || win.isDestroyed() || !win.isFocused()) {
-          notify('妙记 · 纪要已生成', (m.title || '未命名会议') + '（' + m.segments + ' 段转写）');
+          notify('巴别回声 · 纪要已生成', (m.title || '未命名会议') + '（' + m.segments + ' 段转写）');
         }
       }
     }
@@ -444,7 +449,7 @@ function registerIpc() {
     fs.writeFileSync(microphonePrefPath, JSON.stringify(saved), 'utf8');
     return saved;
   });
-  ipcMain.on('miaoji:notify', (_e, payload) => notify((payload && payload.title) || '妙记', (payload && payload.body) || ''));
+  ipcMain.on('miaoji:notify', (_e, payload) => notify((payload && payload.title) || '巴别回声', (payload && payload.body) || ''));
   ipcMain.on('miaoji:recording-state', (_e, payload) => {
     // The page knows the real state instantly; trust it over the poll.
     live = { ...live, recording: !!(payload && payload.value) };
@@ -677,7 +682,7 @@ async function runSelfTest() {
         'worklet: typeof AudioWorkletNode !== "undefined"' +
         '}))()');
       check('window.miaojiDesktop bridge exposed', probe.desktop === true);
-      check('page title is 妙记', /妙记/.test(probe.title), probe.title);
+      check('page title is 巴别回声', /巴别回声/.test(probe.title), probe.title);
       check('four side tabs rendered', probe.tabs === 4, String(probe.tabs));
       check('state pill rendered', !!probe.pill, probe.pill);
       check('engine chip shows the provider', !!probe.engine && probe.engine !== '未就绪', probe.engine);
@@ -799,7 +804,7 @@ async function main() {
     const info = await startServer();
     serverUrl = info.url.endsWith('/') ? info.url : info.url + '/';
   } catch (err) {
-    dialog.showErrorBox('妙记启动失败', String((err && err.message) || err));
+    dialog.showErrorBox('巴别回声启动失败', String((err && err.message) || err));
     quitting = true;
     app.quit();
     return;
@@ -850,7 +855,7 @@ if (!SELFTEST && !CAPTURE && !app.requestSingleInstanceLock()) {
   });
 
   main().catch((err) => {
-    dialog.showErrorBox('妙记启动异常', String((err && err.stack) || err));
+    dialog.showErrorBox('巴别回声启动异常', String((err && err.stack) || err));
     app.quit();
   });
 }

@@ -1,6 +1,6 @@
 # 测试版安全说明
 
-妙记目前是本机单用户测试版，没有服务端账户认证、角色权限或加密的本地密钥库。不要把 `MIAOJI_HOST` 或 `server.host` 配置为公网或局域网地址。浏览器界面、REST API 和 WebSocket 仅预期通过 `127.0.0.1`、`localhost` 或 `[::1]` 访问。
+巴别回声目前是本机单用户测试版，没有服务端账户认证、角色权限或加密的本地密钥库。不要把 `MIAOJI_HOST` 或 `server.host` 配置为公网或局域网地址。浏览器界面、REST API 和 WebSocket 仅预期通过 `127.0.0.1`、`localhost` 或 `[::1]` 访问。
 
 提交代码前运行 `git status --ignored --short` 并检查待提交清单。不要提交 `data/`、`config.json`、`.env*`、API Key、会议转写、录音、上传文件、日志或打包结果。若密钥已经进入远程仓库，先撤销或轮换密钥，再清理仓库历史；只更新 `.gitignore` 无法抹去历史记录。
 

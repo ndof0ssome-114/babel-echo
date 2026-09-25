@@ -1,8 +1,8 @@
 {
-  "name": "miaoji-desktop",
-  "version": "0.1.0-beta.1",
+  "name": "babel-echo-desktop",
+  "version": "0.1.0-beta.2",
   "private": true,
-  "description": "妙记 桌面版（Electron 外壳）",
+  "description": "巴别回声 桌面版（Electron 外壳）",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.miaoji.desktop",
-    "productName": "Miaoji",
+    "productName": "巴别回声",
     "directories": {
       "output": "../dist"
     },
@@ -54,8 +54,11 @@
       ]
     },
     "portable": {
-      "artifactName": "Miaoji-${version}-portable.exe"
+      "artifactName": "BabelEcho-${version}-portable.exe"
+    },
+    "nsis": {
+      "artifactName": "BabelEcho-${version}-setup.exe"
     }
   },
-  "author": "妙记"
+  "author": "巴别回声"
 }

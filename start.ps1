@@ -1,5 +1,5 @@
 ﻿<#
-  妙记 启动脚本
+  巴别回声 启动脚本
   用法:  .\start.ps1 [端口]       默认 8777
 #>
 param([int]$Port = 8777)
@@ -32,5 +32,5 @@ if ($blocked) {
   exit 1
 }
 
-Write-Host "启动 妙记（端口 $Port）..." -ForegroundColor Cyan
+Write-Host "启动 巴别回声（端口 $Port）..." -ForegroundColor Cyan
 & $node server.mjs $Port

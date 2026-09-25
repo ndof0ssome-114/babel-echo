@@ -1,4 +1,4 @@
-# 妙记 Miaoji — AI 会议记录工作台
+# 巴别回声 Babel Echo — AI 会议记录工作台
 
 > 独立的 AI 会议记录测试版：**实时转写 · 实时总结 · 智能纪要 · 逐句翻译 · 会议问答**。
 > 语音识别用**小米 MiMo**（可插拔，支持 Groq / Deepgram / 本地 Whisper），
@@ -7,7 +7,9 @@
 本文件同时是**开发者交接文档**。如果你是一个接手继续开发的 AI（Codex 等），
 **请先读 §3「接手须知」**，那里列了不要破坏的不变量和已经踩过的坑。
 
-**当前版本：`0.1.0-beta.1`。** 仅用于私有测试，尚未发布正式版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
+**当前版本：`0.1.0-beta.2`。** 仅用于私有测试，尚未发布正式版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
+
+品牌图标根据项目使用者提供的角色参考图生成，源图与各尺寸图标见 `desktop/build/`。本仓库未授予第三方复用该角色或图标的许可；若将来公开发布，需先确认参考角色的使用授权。
 
 ---
 
@@ -77,7 +79,7 @@
 ### 纯服务 + 浏览器
 
 ```powershell
-cd <你的项目目录>\miaoji
+cd <你的项目目录>\babel-echo
 node server.mjs 8777          # 或 .\start.ps1
 # 打开 http://127.0.0.1:8777
 ```
@@ -118,11 +120,13 @@ npm start
 
 ```powershell
 cd desktop
-npm run dist              # → ../dist/Miaoji-0.1.0-beta.1-portable.exe（单文件）
+npm run dist              # → ../dist/BabelEcho-0.1.0-beta.2-portable.exe（单文件）
 npm run dist:installer    # → NSIS 安装包
 ```
 
-单文件 portable exe 每次启动会先解压 Electron，适合临时携带。经常使用时建议安装版，或将 `win-unpacked` 文件夹解压一次后直接运行其中的 `Miaoji.exe`。空载启动不会扫描麦克风；打开麦克风下拉框或点击「刷新设备」时才读取设备列表。
+单文件 portable exe 每次启动会先解压 Electron，适合临时携带。经常使用时建议安装版，或将 `win-unpacked` 文件夹解压一次后直接运行其中的 `巴别回声.exe`。空载启动不会扫描麦克风；打开麦克风下拉框或点击「刷新设备」时才读取设备列表。
+
+从旧版「妙记」升级：桌面版继续使用 `%APPDATA%\miaoji-desktop` 保存会议、录音、密钥和界面偏好，并保留原安装身份；安装新版后无需手动搬迁数据。`MIAOJI_*` 环境变量、`miaoji:*` IPC 名称及本地存储键属于兼容标识，不是界面品牌。
 
 ---
 
@@ -189,7 +193,7 @@ npm run dist:installer    # → NSIS 安装包
 ## 5. 目录结构与文件职责
 
 ```
-miaoji/
+babel-echo/
 ├── server.mjs                  HTTP + WebSocket 入口、全部 REST 路由
 ├── package.json                核心服务，scripts 里没有任何 dependencies
 ├── config.json                 运行时配置（首次启动生成，gitignored）
@@ -1184,14 +1188,14 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
 
 | 命令 | 产物 | 大小 |
 | --- | --- | --- |
-| `npm run dist` | `dist/Miaoji-0.1.0-beta.1-portable.exe` | ~100MB |
-| `npm run dist:installer` | NSIS 安装包 | — |
+| `npm run dist` | `dist/BabelEcho-0.1.0-beta.2-portable.exe` | ~100MB |
+| `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.2-setup.exe` | — |
 | `npm run dist:dir` | `dist/win-unpacked/`（免安装目录） | ~368MB |
 
 打包时 `server.mjs` / `lib/` / `public/` 作为 `extraResources` 进 `resources/`，
 `main.cjs` 用 `app.isPackaged ? process.resourcesPath : path.join(__dirname,'..')` 定位。
 
-验证打包版：`dist/win-unpacked/Miaoji.exe --selftest`（有麦克风时目前 43 项应全过）。
+验证打包版：`dist/win-unpacked/巴别回声.exe --selftest`（有麦克风时目前 43 项应全过）。
 
 ---
 

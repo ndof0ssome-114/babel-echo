@@ -1,4 +1,4 @@
-/* 妙记 — interface styles.
+/* 巴别回声 — interface styles.
    Light by default (it is a document tool), dark via [data-theme="dark"]. */
 
 :root {
@@ -83,10 +83,9 @@ button, input, select { font: inherit; color: inherit; }
 
 .logo {
   width: 30px; height: 30px;
-  display: grid; place-items: center;
+  display: block;
+  object-fit: contain;
   border-radius: 8px;
-  background: linear-gradient(140deg, var(--accent), #7aa2ff);
-  color: #fff; font-weight: 700; font-size: 15px;
 }
 
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
@@ -705,9 +704,7 @@ body {
 .logo {
   width: 38px; height: 38px;
   border-radius: 13px;
-  background: linear-gradient(145deg, #3657d3, #6886e9 58%, #70c9d4);
   box-shadow: inset 0 1px rgba(255,255,255,.4), 0 8px 18px rgba(65, 92, 205, .21);
-  font-size: 18px;
 }
 .brand-text b { font-size: 15px; }
 .brand-text i { color: var(--text-3); }

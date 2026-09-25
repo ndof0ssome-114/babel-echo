@@ -1,4 +1,4 @@
-// app.js — the 妙记 client.
+// app.js — the 巴别回声 client.
 //
 // Plain ES modules, no framework. Everything is driven by one WebSocket to
 // the server: control messages go up as JSON, audio goes up as binary
@@ -176,6 +176,7 @@ const t = (key) => translate(key, state.uiLanguage);
 
 function updateUiLanguage() {
   applyStaticTranslations(state.uiLanguage);
+  document.title = t('巴别回声') + ' — ' + t('AI 会议记录工作台');
   if (!state.meeting && ['未命名会议', 'Untitled meeting', '無題の会議'].includes(els.title.value)) {
     els.title.value = t(DEFAULT_TITLE);
   }
@@ -323,7 +324,7 @@ function handleEvent(evt) {
     case 'minutes':
       renderMinutes(evt.minutes);
       // Native toast when the shell has our attention elsewhere.
-      if (desktop) desktop.notify('妙记 · 纪要已生成', els.title.value || '会议纪要');
+      if (desktop) desktop.notify('巴别回声 · 纪要已生成', els.title.value || '会议纪要');
       break;
 
     case 'answer':
