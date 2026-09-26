@@ -12,7 +12,8 @@
 // not require the user to have Node installed.
 
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, dialog,
-        Notification, powerSaveBlocker, nativeImage, shell, desktopCapturer } = require('electron');
+        Notification, powerSaveBlocker, nativeImage, shell, desktopCapturer,
+        systemPreferences } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -55,7 +56,7 @@ if (SELFTEST || CAPTURE) {
   app.setPath('userData', legacyProfile);
 }
 // Mutable state must not live inside the install directory.
-const DATA_DIR = app.isPackaged ? path.join(app.getPath('userData'), 'data') : path.join(ROOT, 'data');
+const DATA_DIR = app.isPackaged || SELFTEST || CAPTURE ? path.join(app.getPath('userData'), 'data') : path.join(ROOT, 'data');
 // electron-builder treats desktop/build as its buildResources directory, so
 // the icon is NOT inside the asar; it is copied to resources/ explicitly.
 const ICON_PNG = app.isPackaged
@@ -91,6 +92,7 @@ function startServer() {
         MIAOJI_PARENT_WATCHDOG: '1',
         MIAOJI_DATA_DIR: DATA_DIR,
         MIAOJI_CONFIG_PATH: path.join(DATA_DIR, 'config.json'),
+        ...((SELFTEST || CAPTURE) ? { DSH_HOME: path.join(DATA_DIR, 'qa-credentials') } : {}),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -192,15 +194,21 @@ function createWindow() {
   ses.setPermissionRequestHandler((wc, permission, callback) => callback(allowed.has(permission)));
   ses.setPermissionCheckHandler((wc, permission) => allowed.has(permission));
   // Capture the primary display's playback audio. The video track is required
-  // by getDisplayMedia but the renderer never connects or stores its pixels.
-  if (process.platform === 'win32') {
+  // by getDisplayMedia, but the renderer stops it immediately and only mixes
+  // the loopback audio. macOS 13+ exposes this through ScreenCaptureKit/Core
+  // Audio Tap; the packaged app also carries the required usage strings.
+  if (['win32', 'darwin'].includes(process.platform)) {
     ses.setDisplayMediaRequestHandler(async (request, callback) => {
       try {
-        if (new URL(request.securityOrigin).origin !== new URL(serverUrl).origin) return;
+        if (new URL(request.securityOrigin).origin !== new URL(serverUrl).origin) {
+          callback({});
+          return;
+        }
         const sources = await desktopCapturer.getSources({ types: ['screen'] });
-        if (sources.length) callback({ video: sources[0], audio: 'loopback' });
+        callback(sources.length ? { video: sources[0], audio: 'loopback' } : {});
       } catch (err) {
         console.error('[display capture]', err);
+        callback({});
       }
     });
   }
@@ -335,7 +343,24 @@ async function pollLive() {
 // ---------------------------------------------------------------------------
 
 function buildMenu() {
-  return Menu.buildFromTemplate([
+  const template = [];
+  if (process.platform === 'darwin') {
+    template.push({
+      label: app.name,
+      submenu: [
+        { role: 'about', label: '关于巴别回声' },
+        { type: 'separator' },
+        { role: 'services', label: '服务' },
+        { type: 'separator' },
+        { role: 'hide', label: '隐藏巴别回声' },
+        { role: 'hideOthers', label: '隐藏其他' },
+        { role: 'unhide', label: '全部显示' },
+        { type: 'separator' },
+        { role: 'quit', label: '退出巴别回声' },
+      ],
+    });
+  }
+  template.push(
     {
       label: '文件',
       submenu: [
@@ -381,7 +406,8 @@ function buildMenu() {
         { label: '打开应用文件夹', click: () => shell.openPath(ROOT) },
       ],
     },
-  ]);
+  );
+  return Menu.buildFromTemplate(template);
 }
 
 /**
@@ -429,6 +455,13 @@ function registerIpc() {
   });
 
   ipcMain.handle('miaoji:server-url', () => serverUrl);
+  ipcMain.handle('miaoji:media-access-status', () => {
+    if (process.platform !== 'darwin') return null;
+    return {
+      microphone: systemPreferences.getMediaAccessStatus('microphone'),
+      screen: systemPreferences.getMediaAccessStatus('screen'),
+    };
+  });
   const microphonePrefPath = path.join(app.getPath('userData'), 'microphone.json');
   ipcMain.handle('miaoji:microphone-get', () => {
     try {
@@ -620,6 +653,77 @@ async function testSettingsDrawer(check, evalJs) {
   check('settings button toggles the drawer', (await drawerHidden()) === true);
 }
 
+async function testModelSettings(check, evalJs) {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const before = await (await fetch(serverUrl + 'api/config')).json();
+  await evalJs('document.getElementById("btnSettings").click()');
+  await pause(500);
+  const choose = async (field, value) => evalJs(`(() => {
+    const e = document.querySelector('[data-task="summary"] [data-field="${field}"]');
+    e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('change', {bubbles:true}));
+  })()`);
+  const save = async () => {
+    await evalJs('document.querySelector(\'[data-task="summary"] [data-action="save-task"]\').click()');
+    await pause(600);
+    return (await (await fetch(serverUrl + 'api/config')).json()).llm.roles.summary;
+  };
+  try {
+    await choose('model-select', 'deepseek-v4-pro');
+    await choose('thinking', 'disabled');
+    const pro = await save();
+    check('task picker saves DeepSeek Pro and thinking mode', pro.model === 'deepseek-v4-pro' && pro.thinking === 'disabled');
+    await choose('model-select', 'deepseek-flash');
+    check('task picker switches back to Flash', (await save()).model === 'deepseek-flash');
+
+    // Mock discovery only. Config writes still pass through the real server.
+    // No external model calls or credentials are needed for these UI checks.
+    await evalJs(`(() => {
+      window.qaOriginalFetch = window.fetch;
+      window.fetch = async (...args) => String(args[0]).includes('/models')
+        ? new Response(JSON.stringify({models:['qa-local-small', 'qa-local-large']}), {status:200})
+        : window.qaOriginalFetch(...args);
+    })()`);
+    await choose('provider', 'local');
+    await pause(300);
+    const choices = await evalJs(`(() => {
+      const card = document.querySelector('[data-task="summary"]');
+      return { ids: [...card.querySelector('[data-field="model-select"]').options].map(o=>o.value),
+        thinkingDisabled: card.querySelector('[data-field="thinking"]').disabled };
+    })()`);
+    check('provider change loads selectable models and resets previous ID', choices.ids.includes('qa-local-small') && !choices.ids.includes('deepseek-flash') && choices.thinkingDisabled);
+    await choose('model-select', 'qa-local-large');
+    const local = await save();
+    check('local model selection persists', local.provider === 'local' && local.model === 'qa-local-large');
+    await choose('model-select', '__manual_model__');
+    await choose('model-id', 'custom/model:latest');
+    check('manual model ID persists exactly', (await save()).model === 'custom/model:latest');
+
+    await evalJs(`(() => {
+      const s = document.querySelector('[data-settings="summary"]');
+      s.querySelector('[data-field="autoMs"]').value = '240';
+      s.querySelector('[data-field="minNewChars"]').value = '300';
+      s.querySelector('button').click();
+    })()`);
+    await pause(500);
+    const summary = (await (await fetch(serverUrl + 'api/config')).json()).summary;
+    check('summary interval and new text threshold persist', summary.autoMs === 240000 && summary.minNewChars === 300);
+    await evalJs(`(() => {
+      const drawer = document.getElementById('drawerBody');
+      const target = document.querySelector('[data-task="summary"]');
+      drawer.scrollTo({top: drawer.scrollTop + target.getBoundingClientRect().top - drawer.getBoundingClientRect().top - 12, behavior:'instant'});
+    })()`);
+    await pause(250);
+    if (process.env.MIAOJI_QA_CAPTURE_DIR) {
+      fs.mkdirSync(process.env.MIAOJI_QA_CAPTURE_DIR, { recursive: true });
+      fs.writeFileSync(path.join(process.env.MIAOJI_QA_CAPTURE_DIR, 'task-model-settings.png'), (await win.webContents.capturePage()).toPNG());
+    }
+  } finally {
+    await evalJs('if (window.qaOriginalFetch) { window.fetch = window.qaOriginalFetch; delete window.qaOriginalFetch; }');
+    await fetch(serverUrl + 'api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ llm: before.llm, summary: before.summary }) });
+    await evalJs('document.getElementById("drawerClose").click()');
+  }
+}
+
 async function testCustomSettings(check, evalJs) {
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   await evalJs('document.getElementById("btnSettings").click()');
@@ -685,7 +789,7 @@ async function runSelfTest() {
       check('page title is 巴别回声', /巴别回声/.test(probe.title), probe.title);
       check('four side tabs rendered', probe.tabs === 4, String(probe.tabs));
       check('state pill rendered', !!probe.pill, probe.pill);
-      check('engine chip shows the provider', !!probe.engine && probe.engine !== '未就绪', probe.engine);
+      check('engine chip shows provider readiness', !!probe.engine, probe.engine);
       check('getUserMedia available', probe.canRecord === true);
       check('AudioWorklet available', probe.worklet === true);
 
@@ -708,8 +812,8 @@ async function runSelfTest() {
         ' system: !!document.getElementById("includeSystemAudio"),' +
         ' checked: document.getElementById("includeSystemAudio")?.checked })');
       check('microphone test and system audio controls rendered', audioUi.test && audioUi.system);
-      if (process.platform === 'win32') {
-        check('system audio enabled by default on Windows', audioUi.checked === true);
+      if (['win32', 'darwin'].includes(process.platform)) {
+        check('system audio enabled by default on supported desktop', audioUi.checked === true);
         const loopback = await Promise.race([
           win.webContents.executeJavaScript('(async () => {' +
             'let stream; try { stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});' +
@@ -774,6 +878,7 @@ async function runSelfTest() {
         'url=' + String(deepLinkMeeting));
 
       await testSettingsDrawer(check, evalJs);
+      await testModelSettings(check, evalJs);
       await testCustomSettings(check, evalJs);
     }
   } catch (err) {

@@ -282,26 +282,31 @@ async function handleApi(req, res, url) {
         asr.config = next;
         asr.instances.clear();
         llm.config = next;
+        if (patch.summary) {
+          for (const meeting of meetings.values()) {
+            if (['recording', 'paused'].includes(meeting.state)) meeting.startSummaryTimer();
+          }
+        }
         return sendJson(res, 200, { ok: true, status: providerStatus(next, creds) });
       } catch (err) { return sendJson(res, 400, { error: err.message }); }
     }
   }
 
-  if (rest[0] === 'providers' && rest[1] === 'llm' && rest[3] === 'models' && method === 'GET') {
-    const provider = config.llm.providers[rest[2]];
+  if (rest[0] === 'providers' && ['llm', 'asr'].includes(rest[1]) && rest[3] === 'models' && method === 'GET') {
+    const provider = config[rest[1]].providers[rest[2]];
     if (!provider) return sendJson(res, 404, { error: '引擎不存在' });
     try {
       const key = creds[provider.keyRef];
       if (!key && !provider.noAuth) return sendJson(res, 400, { error: '请先配置 API Key' });
       const response = await fetch(provider.baseUrl.replace(/\/+$/, '') + '/models', {
-        headers: key ? { authorization: 'Bearer ' + key } : {},
+        headers: key ? { authorization: (provider.kind === 'deepgram' ? 'Token ' : 'Bearer ') + key } : {},
         signal: AbortSignal.timeout(10000),
       });
       if (!response.ok) return sendJson(res, 502, { error: '读取模型列表失败：HTTP ' + response.status });
       const body = await response.json();
-      const models = (Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [])
-        .map((item) => typeof item === 'string' ? item : item.id || item.name)
-        .filter(Boolean).slice(0, 200);
+      const models = [...new Set((Array.isArray(body.data) ? body.data : Array.isArray(body.models) ? body.models : [])
+        .map((item) => typeof item === 'string' ? item : item?.id || item?.name || item?.model)
+        .filter((id) => typeof id === 'string' && id.trim()))].slice(0, 200);
       return sendJson(res, 200, { models });
     } catch (err) { return sendJson(res, 502, { error: '无法连接模型服务：' + err.message }); }
   }

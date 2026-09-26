@@ -5,7 +5,7 @@
 这里保留项目架构、协议、数据模型、测试流程、已知限制与排障记录。
 接手修改代码前，**请先读 §3「接手须知」**，再查阅相关章节中的不变量和已踩过的坑。
 
-**当前版本：`0.1.0-beta.3`。** 公开测试版，尚未发布正式稳定版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
+**源码版本：`0.1.0-beta.4`（测试中，已发布安装包仍为 beta.3）。** 尚未发布正式稳定版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
 
 品牌图标根据项目使用者提供的角色参考图生成，源图与各尺寸图标见 `desktop/build/`。仓库公开不表示授予第三方复用该角色或图标的许可；再分发前应确认相应授权。
 
@@ -84,7 +84,7 @@ node server.mjs 8777          # 或 .\start.ps1
 
 密钥可在「设置」中保存，也可从环境变量或 `~/.dsh/.credentials.yaml` 读取。首次使用云端模型时需要配置对应的密钥。
 
-录音前可在顶部「麦克风」下拉框选择输入设备；点击「刷新设备」可授权并显示设备名称。点击「测试麦克风」并说话，确认音量条有反应。Windows 桌面版默认勾选「同时录电脑声音」，把所选麦克风与扬声器播放的声音混合录入；可在开始前取消勾选。
+录音前可在顶部「麦克风」下拉框选择输入设备；点击「刷新设备」可授权并显示设备名称。点击「测试麦克风」并说话，确认音量条有反应。Windows 与 macOS 13+ 桌面版默认勾选「同时录电脑声音」，把所选麦克风与系统播放声音混合录入；可在开始前取消勾选。macOS 会请求屏幕与系统音频权限，但取得音频轨道后立即停止视频轨道，不保存或传输画面。
 录音中也可切换，界面会显示实际连接的麦克风。桌面版会记住选择，并在下次启动时按设备名称重新匹配。
 录音、暂停、结束和导入集中在上方操作区；语言、麦克风和电脑声音放在下方采集设置区。窄窗口会将转写与摘要上下排列，并允许整页滚动。外观支持浅色、深色和跟随系统；半透明玻璃面板只在主要区域使用模糊，减少渲染负担。
 
@@ -94,7 +94,10 @@ node server.mjs 8777          # 或 .\start.ps1
 - 「设置 → 语音识别引擎」可启用、编辑模型 ID 与接口地址、更新 API Key，或新增 OpenAI Audio / Deepgram / MiMo 协议的自定义引擎。按语言路由决定每种语音使用哪个引擎。
 - 「设置 → 实时识别节奏」可调整预览发送间隔、停顿定稿时间、最长单句和硬切时保留的衔接音频。预览刷新与句子定稿独立：停顿可提前定稿；Groq 预览由于请求额度最低按 10 秒间隔发送。
 - 分句策略参考 [Deepgram 的可调静音端点](https://developers.deepgram.com/docs/endpointing)、[whisper.cpp 的 `--keep` 重叠音频](https://github.com/ggml-org/whisper.cpp/blob/941bdabb/examples/stream/stream.cpp) 和 [Whisper-Streaming 的局部确认与句末裁剪](https://arxiv.org/html/2307.14743v2)。当前应用用本地音量门限判停顿；长句到上限后最多再等 5 秒寻找停顿，仍不停顿才保留默认 1.2 秒重叠音频并去除可确定的重复文字。噪声大或多人同时说话时，纯音量门限仍可能误判，原始音频会完整保存。
-- 「设置 → 文本模型」可编辑 DeepSeek、MiMo 和本地引擎，也可新增 OpenAI Chat Completions 兼容服务。「任务模型」分别设置摘要、纪要、翻译和问答的提供方与模型 ID。文本引擎的「查看模型」会尝试读取 `/models`，如果服务不提供该接口，可手动输入 ID。
+- 「设置 → 文本模型」可编辑 DeepSeek、MiMo 和本地引擎，也可新增 OpenAI Chat Completions 兼容服务。「任务模型」分别选择摘要、纪要、翻译和问答的服务与模型；「读取模型列表」请求 `/api/providers/:category/:name/models`，无法发现时仍可手动输入 ID。切换服务会清空旧模型，异步列表不会覆盖已输入的 ID。语音引擎也支持模型列表。
+- 「设置 → 摘要与用量」控制 `summary.autoMs`（0 或 30000–3600000）、`minNewChars`（0–10000）、`maxChars`（200–3000，为提示词目标）。新配置默认 180 秒 / 200 字，已有间隔保留。手动总结不受新增字数门限限制。
+- 摘要与翻译默认 `thinking: disabled`，仅向 `api.deepseek.com` 发送 `thinking.type`；其他服务不注入该字段。任务可选择 `default` / `enabled` / `disabled`。每次 HTTP 尝试通过 `onUsage` 统计，包括 JSON 修复与失败响应；`completionTokens` 包含服务计入其中的思考 token，不能再加一次 `reasoningTokens`。未返回 usage 的请求记入 `llmUnreportedCalls`，旧会议标记历史不完整。输出截断或不确定的网络错误不会提高输出上限并重发；明确可重试 HTTP 状态仍最多尝试 3 次。
+- 摘要使用请求发起时的片段游标，成功后只推进到该游标；`summaryUpTo` / `summaryAt` 随会议保存。缺少旧游标的历史摘要在下一次手动总结时从转写重建，避免漏掉尾部。
 - 本地文本模型示例：[Ollama](https://github.com/ollama/ollama/blob/main/docs/api/openai-compatibility.mdx) 的接口地址为 `http://127.0.0.1:11434/v1`；[LM Studio](https://lmstudio.ai/docs/developer/openai-compat) 常用 `http://127.0.0.1:1234/v1`。启动本地服务并确保模型已加载，再勾选引擎，在「任务模型」中填写其模型 ID。支持无密钥服务；需要鉴权时取消「无需 API Key」并保存密钥。
 - 本地语音模型示例：提供 OpenAI 兼容 `/audio/transcriptions` 的服务可填入 `http://127.0.0.1:8080/v1`，具体模型 ID 以该服务为准。应用不会自动下载或启动本地模型。
 
@@ -118,8 +121,9 @@ npm start
 
 ```powershell
 cd desktop
-npm run dist              # → ../dist/BabelEcho-0.1.0-beta.3-setup.exe（安装向导）
-npm run dist:portable     # → ../dist/BabelEcho-0.1.0-beta.3-portable.exe（单文件）
+npm run dist              # → ../dist/BabelEcho-0.1.0-beta.4-setup.exe（安装向导）
+npm run dist:portable     # → ../dist/BabelEcho-0.1.0-beta.4-portable.exe（单文件）
+npm run dist:mac          # → ../dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg / .zip（需在 Mac 上运行）
 ```
 
 安装版会弹出向导，选择安装范围和目录后再安装；已有安装升级时沿用原目录。卸载会先确认，再询问是否保留本机会议录音、转写、存档和设置，默认保留；选择删除才会在卸载完成后移除当前用户的应用数据（包括 API Key）。静默卸载和版本升级始终保留数据。
@@ -205,7 +209,7 @@ babel-echo/
 │   ├── wav.mjs                 WAV 头读写、Float32→Int16、RMS、静音切片
 │   ├── env.mjs                 凭据加载（env > DSH > 本地）+ 本地凭据写入
 │   ├── config.mjs              配置默认值 / 加载 / 原地保存 / provider 状态
-│   ├── llm.mjs                 LLM 客户端（含推理 token 重试、JSON 修复）
+│   ├── llm.mjs                 LLM 客户端（固定输出上限、逐次用量、JSON 修复）
 │   ├── prompts.mjs             全部提示词，改提示词只改这个文件
 │   ├── meeting.mjs             ★ 实时会话状态机（核心，26KB）
 │   ├── import.mjs              音视频文件导入（ffmpeg → 切片 → ASR）
@@ -279,7 +283,7 @@ babel-echo/
   │                              │   └─ scheduleSave()
   │ ◀── {type:'segment-update'}──│ ◀── LLM 翻译 ───────────
   │                              │
-  │                     每 60s（summary.autoMs）：
+  │                     每 180s（summary.autoMs，已有配置保留）：
   │ ◀── {type:'summary'} ────────│ ◀── LLM 滚动总结 ───────
   │  （只把「上次摘要 + 新增文本」发给模型）
   │
@@ -367,7 +371,7 @@ MiMo 特例：只允许明确的中文和英文请求；日语不会回退到 Mi
     "vadThreshold": 0.003    // RMS 门限，低于此值视为静音
   },
 
-  "summary": { "autoMs": 60000, "maxChars": 900 },   // autoMs=0 关闭自动总结
+  "summary": { "autoMs": 180000, "maxChars": 900, "minNewChars": 200 }, // autoMs=0 关闭自动总结
 
   "translate": { "target": "ja" },                   // 新建会议的默认翻译目标
 
@@ -705,9 +709,9 @@ extractJson(text) → object|null      // 剥 ```json 围栏，扫括号配对�
 class Llm {
   constructor(config, creds)
   stats                                // {calls, promptTokens, completionTokens, reasoningTokens, ms}
-  resolve(roleName) → {providerName, provider, model, key}
-  async call(roleName, messages, opts) // opts: {temperature, maxTokens, json, stream, onDelta, signal, timeoutMs}
-                                       // ★ 内置：空内容 + finish_reason=length → 预算×3 重试（见 §12.1）
+  resolve(roleName) → {providerName, provider, model, thinking, key}
+  async call(roleName, messages, opts) // opts: {temperature, maxTokens, json, stream, onDelta, onUsage, signal, timeoutMs}
+                                       // 每次 HTTP 尝试都上报 onUsage；length 不自动增额重试（见 §12.1）
   async json(roleName, messages, opts) // 解析失败会自动追加一轮纠正重试
 }
 createLlm(config, creds) → Llm
@@ -921,9 +925,10 @@ Node 的 `EventEmitter` 在**没有 `'error'` 监听器**时 `emit('error')` **�
 给少了会返回 **HTTP 200 + `content: ""` + `finish_reason: "length"`**
 （`reasoning_tokens` 恰好等于 `max_tokens`）。表现为"摘要莫名其妙是空的"。
 
-- 本机可用模型只有 `deepseek-flash` 和 `deepseek-v4-pro`（**不是** deepseek-chat/reasoner）
-- 预算：摘要 ≥4000、纪要 ≥16000、翻译/问答 ≥4000
-- `llm.mjs` 已内置「空内容 + length → 预算×3 重试」，不要删
+- 默认模型 ID 为 `deepseek-flash` 和 `deepseek-v4-pro`，其他 ID 应以所选服务的列表为准。
+- 当前输出上限：摘要/翻译 4000、纪要 16000、问答 6000；思考模式会占用输出预算。
+- **beta.4 已移除旧的「空内容 + length → 预算×3 重试」**：它会让一次任务消耗多轮大预算，旧统计还漏记前面的请求。现在保留旧摘要并提示调整模型或思考模式，不能恢复无提示的预算升级。
+- 默认关闭摘要/翻译的 DeepSeek 思考模式；需要推理时可在任务模型中明确开启。官方说明：https://api-docs.deepseek.com/guides/thinking_mode/
 
 ### 12.2 `EventEmitter` + `'error'` → 进程崩溃
 
@@ -1046,7 +1051,7 @@ node scripts/confirm-tts-hypothesis.mjs  # 证明乱码来自 TTS
 - MiMo：明确的日语请求在出网前被拒绝
 - 全流程：服务端走 Groq、翻译齐全、纪要生成、计费正确
 
-### 13.5 桌面外壳自检（有麦克风时至少 43 项）
+### 13.5 桌面外壳自检（有麦克风时至少 49 项）
 
 ```powershell
 cd desktop
@@ -1064,6 +1069,8 @@ npm test        # = electron . --selftest
 - 渲染进程能访问本地 API、`/api/live` 正常
 - **设置面板交互**（10 项）：打开 → 渲染所有 provider 行 → body 可滚动未被裁切 →
   滚到底可达 → 切开关**能持久化** → 抽屉保持打开 → × 关闭 / Esc 关闭 / 点背景关闭 / 按钮 toggle
+- Flash/Pro 切换、思考模式、服务切换后模型发现、手动 ID、摘要间隔与字数门限保存。模型发现使用 mock；配置写入经过真实本机 API。自检和截图使用临时数据与凭据目录，避免改写用户设置。
+- `node scripts/test-llm-cost.mjs`：完全离线检查实际请求模型 ID、思考参数边界、截断不增额重试、HTTP/JSON 重试用量、摘要游标并发及落盘、各文本任务统计与门限。
 
 ### 13.6 回归清单（提交前）
 
@@ -1151,7 +1158,7 @@ npx electron . --capture=../.probe/shot.png --open=meeting=<id>&settings=1
 
 | 项 | 值 |
 | --- | --- |
-| OS | Windows（桌面版） |
+| OS | Windows 10/11；macOS 13+ Apple Silicon（桌面版） |
 | Node | 20 或更高版本，加入 PATH |
 | npm | 随 Node 安装 |
 | ffmpeg / ffprobe | 音视频导入时需加入 PATH |
@@ -1159,6 +1166,7 @@ npx electron . --capture=../.probe/shot.png --open=meeting=<id>&settings=1
 | PowerShell | Windows PowerShell 5.1 或 PowerShell 7 |
 | 日语 SAPI 语音 | 仅日语测试夹具需要 |
 | Electron | ^44.4.5 |
+| macOS 发布 | M 芯片 Mac、Xcode、Developer ID Application 证书；公开包需 Apple 公证 |
 | electron-builder | ^26.15.3 |
 
 ### 15.2 相关环境变量
@@ -1188,8 +1196,9 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
 
 | 命令 | 产物 | 大小 |
 | --- | --- | --- |
-| `npm run dist` / `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.3-setup.exe` | — |
-| `npm run dist:portable` | `dist/BabelEcho-0.1.0-beta.3-portable.exe` | ~100MB |
+| `npm run dist` / `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.4-setup.exe` | — |
+| `npm run dist:portable` | `dist/BabelEcho-0.1.0-beta.4-portable.exe` | ~100MB |
+| `npm run dist:mac` | `dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg` + `.zip` | 仅 M 芯片；公开分发前签名并公证 |
 | `npm run dist:dir` | `dist/win-unpacked/`（免安装目录） | ~368MB |
 
 打包时 `server.mjs` / `lib/` / `public/` 作为 `extraResources` 进 `resources/`，
@@ -1233,7 +1242,7 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
 
 **长期**
 
-- macOS / Linux 打包（`electron-builder` 配置改成多 target）
+- macOS x64 / Linux 打包（M 芯片 arm64 已配置；仍需真机权限、签名和公证验证）
 - 局域网收音：手机当麦克风（PWA + WS）
 - 自动更新（`electron-updater`）
 - 会议音频导出为 WAV（目前只有 mp3）

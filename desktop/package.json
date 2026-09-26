@@ -1,6 +1,6 @@
 {
   "name": "babel-echo-desktop",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "private": true,
   "description": "巴别回声 桌面版（Electron 外壳）",
   "main": "main.cjs",
@@ -12,7 +12,9 @@
     "dist": "electron-builder --win nsis",
     "dist:installer": "electron-builder --win nsis",
     "dist:portable": "electron-builder --win portable",
-    "dist:dir": "electron-builder --win --dir"
+    "dist:dir": "electron-builder --win --dir",
+    "dist:mac": "electron-builder --mac dmg zip --arm64",
+    "dist:mac:dir": "electron-builder --mac dir --arm64"
   },
   "devDependencies": {
     "electron": "^44.4.5",
@@ -52,6 +54,36 @@
       "icon": "build/icon.ico",
       "target": [
         "nsis"
+      ]
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "13.0.0",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "artifactName": "BabelEcho-${version}-mac-${arch}.${ext}",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["arm64"]
+        }
+      ],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "巴别回声需要使用麦克风录制并转写会议语音。",
+        "NSAudioCaptureUsageDescription": "巴别回声在你启用电脑声音时采集系统播放的音频；不会保存屏幕画面。",
+        "NSScreenCaptureUsageDescription": "巴别回声需要系统录制权限来获取电脑播放的音频；不会保存屏幕画面。"
+      }
+    },
+    "dmg": {
+      "title": "巴别回声 ${version}",
+      "contents": [
+        { "x": 150, "y": 180, "type": "file" },
+        { "x": 390, "y": 180, "type": "link", "path": "/Applications" }
       ]
     },
     "portable": {

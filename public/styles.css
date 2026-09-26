@@ -613,6 +613,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .settings-check { display: flex; align-items: center; gap: 7px; font-size: 12px; align-self: end; padding-bottom: 7px; }
 .settings-check input { accent-color: var(--accent); }
 .settings-note { color: var(--text-2); font-size: 12px; line-height: 1.55; margin: 0 0 10px; }
+.task-model-card { padding: 14px; margin: 10px 0; border: 1px solid var(--border); }
+.task-model-card > strong { font-size: 13px; }
+.model-picker { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; }
+.model-picker > .btn { align-self: flex-start; }
+.model-picker .settings-note { overflow-wrap: anywhere; margin: 0; }
 .settings-actions { display: flex; gap: 8px; margin: 3px 0 12px; }
 .provider-details .key-row { padding: 11px 0 0; border-top: 1px solid var(--border); }
 .provider-details .key-row input { min-width: 0; }

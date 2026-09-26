@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('miaojiDesktop', {
   /** The port the bundled server actually bound to. */
   serverUrl: () => ipcRenderer.invoke('miaoji:server-url'),
 
+  /** macOS privacy state; null on platforms that do not expose it. */
+  getMediaAccessStatus: () => ipcRenderer.invoke('miaoji:media-access-status'),
+
   getMicrophonePreference: () => ipcRenderer.invoke('miaoji:microphone-get'),
   setMicrophonePreference: (preference) => ipcRenderer.invoke('miaoji:microphone-set', preference),
 

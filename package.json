@@ -1,6 +1,6 @@
 {
   "name": "babel-echo",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "private": true,
   "type": "module",
   "description": "巴别回声 — AI 会议记录工作台：实时转写 / 实时总结 / 智能纪要 / 逐句翻译 / 会议问答",
@@ -18,6 +18,7 @@
     "fixture": "node scripts/make-fixture.mjs",
     "test:adapters": "node scripts/test-adapters.mjs",
     "test:regressions": "node scripts/test-regressions.mjs",
+    "test:llm-cost": "node scripts/test-llm-cost.mjs",
     "test:local-access": "node scripts/test-local-access.mjs",
     "test:e2e": "node scripts/e2e.mjs",
     "test:import": "node scripts/test-import.mjs"

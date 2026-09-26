@@ -92,6 +92,12 @@ try {
   const appBase = await serverReady;
   const listed = await (await fetch(new URL('/api/providers/llm/custom_local_test/models', appBase))).json();
   assert.deepEqual(listed.models, ['local-test-model']);
+  await fetch(new URL('/api/config', appBase), {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ asr: { providers: { local: { baseUrl } } } }),
+  });
+  const speechModels = await (await fetch(new URL('/api/providers/asr/local/models', appBase))).json();
+  assert.deepEqual(speechModels.models, ['local-test-model']);
   console.log('PASS model list is available through the application API');
   appServer.kill();
   appServer = null;
@@ -114,6 +120,7 @@ try {
   assert.equal(config.asr.routes.ja, 'groq');
   deleteCustomProvider('llm', 'custom_local_test');
   assert.equal(config.llm.roles.summary.provider, 'deepseek');
+  assert.equal(config.llm.roles.summary.model, 'deepseek-flash', 'removing a provider must also reset its incompatible model ID');
   console.log('PASS custom providers can be added, routed, and removed safely');
 
   saveConfig({ asr: { providers: { mimo: { label: 'My MiMo', languages: ['zh', 'en'] } } } });

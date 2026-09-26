@@ -1,0 +1,80 @@
+name: Build macOS Apple Silicon
+
+on:
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Sign and notarize with the configured Apple secrets
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop
+
+      - name: Run offline regression tests
+        run: |
+          node scripts/test-adapters.mjs
+          node scripts/test-regressions.mjs
+          node scripts/test-custom-providers.mjs
+          node scripts/test-llm-cost.mjs
+
+      - name: Build unsigned test package
+        if: ${{ inputs.signed == false }}
+        run: npm --prefix desktop run dist:mac -- --config.mac.identity=null --config.mac.notarize=false
+
+      - name: Check signing credentials
+        if: ${{ inputs.signed == true }}
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          test -n "$CSC_LINK"
+          test -n "$CSC_KEY_PASSWORD"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_APP_SPECIFIC_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+
+      - name: Build signed and notarized package
+        if: ${{ inputs.signed == true }}
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm --prefix desktop run dist:mac
+
+      - name: Create checksums
+        run: |
+          cd dist
+          shasum -a 256 BabelEcho-*-mac-arm64.dmg BabelEcho-*-mac-arm64.zip > SHA256SUMS-mac-arm64.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: babel-echo-macos-arm64-${{ inputs.signed && 'signed' || 'unsigned' }}
+          path: |
+            dist/BabelEcho-*-mac-arm64.dmg
+            dist/BabelEcho-*-mac-arm64.zip
+            dist/SHA256SUMS-mac-arm64.txt
+          if-no-files-found: error
+          retention-days: 14

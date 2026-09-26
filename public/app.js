@@ -728,11 +728,19 @@ function renderStats(stats) {
     ['识别音频时长', fmtClock((s.asrSeconds || 0) * 1000)],
     ['识别耗时', (Math.round((s.asrMs || 0) / 100) / 10) + ' ' + t('秒')],
     ['识别费用', (Math.round((s.asrCost || 0) * 10000) / 10000) + ' ' + (s.asrCostCurrency || '')],
-    ['文本模型调用', (s.llmCalls || 0) + ' ' + t('次')],
+    ['文本请求（含重试）', (s.llmCalls || 0) + ' ' + t('次')],
     ['文本耗时', (Math.round((s.llmMs || 0) / 100) / 10) + ' ' + t('秒')],
     ['翻译片段', (s.translateHits || 0) + ' ' + t('条')],
     ['输入 / 输出 token', (s.promptTokens || 0) + ' / ' + (s.completionTokens || 0)],
+    ['其中思考 token（服务返回）', s.reasoningReportedCalls ? String(s.reasoningTokens || 0) : t('未单独报告')],
+    ['缓存命中输入 token', String(s.cachedInputTokens || 0)],
+    ['未返回完整用量的请求', String(s.llmUnreportedCalls || 0)],
   ];
+  for (const [task, usage] of Object.entries(s.llmByTask || {})) {
+    const label = { summary: '摘要', translate: '翻译', minutes: '纪要', ask: '回答', speakers: 'AI 分角色' }[task] || task;
+    rows.push([label, (usage.calls || 0) + ' ' + t('次') + ' · ' + (usage.promptTokens || 0) + ' / ' + (usage.completionTokens || 0) + ' token']);
+  }
+  if (s.historicalUsageIncomplete || (s.llmCalls && !s.tokenStatsVersion)) rows.push(['用量说明', t('旧会议用量不完整，仅新增请求按任务统计。')]);
   els.statsList.replaceChildren(...rows.flatMap(([k, v]) => [h('dt', { text: t(k) }), h('dd', { text: v })]));
 }
 
@@ -1011,7 +1019,10 @@ function stopCapture() {
 }
 
 function systemAudioError(err) {
-  if (err?.name === 'NotAllowedError') return '电脑声音采集未获授权。请允许屏幕共享，或取消勾选「同时录电脑声音」。';
+  if (err?.name === 'NotAllowedError') {
+    if (desktop?.platform === 'darwin') return '电脑声音采集未获授权。请在 macOS「系统设置 → 隐私与安全性」中允许屏幕与系统音频录制，然后重新打开应用。';
+    return '电脑声音采集未获授权。请允许屏幕共享，或取消勾选「同时录电脑声音」。';
+  }
   return '无法采集电脑声音：' + (err?.message || String(err));
 }
 
@@ -1021,11 +1032,15 @@ async function openSystemAudio() {
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     if (!stream.getAudioTracks().length) throw new Error('系统未提供音频轨道，请检查电脑的播放设备。');
+    // Chromium requires a display track to request loopback audio. Keeping it
+    // alive wastes GPU/CPU and shows an unnecessary screen-capture indicator;
+    // the meeting stores audio only, so stop video as soon as audio exists.
+    stream.getVideoTracks().forEach((track) => track.stop());
     state.systemStream = stream;
     const onEnded = () => {
       if (state.systemStream === stream && state.recording) showBanner('电脑声音采集已中断，请结束录音后重新开始。', 'error');
     };
-    stream.getTracks().forEach((track) => track.addEventListener('ended', onEnded));
+    stream.getAudioTracks().forEach((track) => track.addEventListener('ended', onEnded));
   } catch (err) {
     stream?.getTracks().forEach((track) => track.stop());
     throw new Error(systemAudioError(err));
@@ -1423,15 +1438,17 @@ async function openSettings() {
   const boot = await (await fetch('/api/bootstrap?lite=1')).json();
   const s = boot.status;
   state.status = s;
+  const catalog = new Map();
 
   body.append(
     h('div', { class: 'settings-intro' },
       h('strong', { text: t('自定义引擎') }),
       h('p', { text: t('密钥保存在本机，不会显示原文。') + ' ' + t('服务必须由你自行启动；接口地址填写到 /v1，不含具体方法名。') })),
     realtimeSettings(s.realtime),
+    summarySettings(s.summary),
     h('section', { class: 'settings-section' },
       h('div', { class: 'settings-section-head' }, h('h4', { text: t('语音识别引擎') }), h('span', { text: s.asr.length + ' ASR' })),
-      ...s.asr.map((p) => providerCard('asr', p)),
+      ...s.asr.map((p) => providerCard('asr', p, catalog)),
       customProviderForm('asr')),
     h('section', { class: 'settings-section' },
       h('div', { class: 'settings-section-head' }, h('h4', { text: t('按语言路由') })),
@@ -1449,20 +1466,12 @@ async function openSettings() {
       }))),
     h('section', { class: 'settings-section' },
       h('div', { class: 'settings-section-head' }, h('h4', { text: t('文本模型') }), h('span', { text: s.llm.length + ' LLM' })),
-      ...s.llm.map((p) => providerCard('llm', p)),
+      ...s.llm.map((p) => providerCard('llm', p, catalog)),
       customProviderForm('llm')),
     h('section', { class: 'settings-section' },
       h('div', { class: 'settings-section-head' }, h('h4', { text: t('任务模型') })),
-      ...Object.entries(s.roles).map(([roleName, role]) => {
-        const provider = h('select', {}, ...s.llm.map((p) => h('option', {
-          value: p.name, selected: p.name === role.provider, text: p.label + (p.ready && p.enabled ? '' : ' ⚠'),
-        })));
-        const model = h('input', { value: role.model, placeholder: 'model-id', spellcheck: false });
-        const roleLabel = { summary: '摘要', minutes: '纪要', translate: '翻译', ask: '回答' }[roleName] || roleName;
-        return h('div', { class: 'role-row' }, h('strong', { text: t(roleLabel) }), provider, model,
-          h('button', { class: 'btn tiny', text: t('保存'), onclick: () => settingsAction(
-            () => patchConfig({ llm: { roles: { [roleName]: { provider: provider.value, model: model.value.trim() } } } }), '设置已保存') }));
-      })),
+      h('p', { class: 'settings-note', text: t('为每个任务选择服务和模型；列表不可用时可手动输入模型 ID。思考开关仅适用于 DeepSeek 官方接口。') }),
+      ...Object.entries(s.roles).map(([roleName, role]) => taskModelSettings(roleName, role, s.llm, catalog))),
     h('section', { class: 'settings-section' },
       h('div', { class: 'settings-section-head' }, h('h4', { text: t('界面外观') })),
       h('label', { class: 'settings-field' }, h('span', { text: t('界面外观') }),
@@ -1506,8 +1515,117 @@ function realtimeSettings(realtime) {
   );
 }
 
+function summarySettings(summary = {}) {
+  const specs = [
+    ['autoMs', '自动摘要间隔（秒，0 为关闭）', 0, 3600, (summary.autoMs ?? 180000) / 1000],
+    ['minNewChars', '自动摘要最少新增字数', 0, 10000, summary.minNewChars ?? 200],
+    ['maxChars', '摘要目标字数', 200, 3000, summary.maxChars ?? 900],
+  ];
+  const inputs = Object.fromEntries(specs.map(([key, label, min, max, value]) =>
+    [key, h('input', { type: 'number', min, max, step: 1, value, 'data-field': key, 'aria-label': t(label) })]));
+  return h('section', { class: 'settings-section', 'data-settings': 'summary' },
+    h('div', { class: 'settings-section-head' }, h('h4', { text: t('摘要与用量') })),
+    h('div', { class: 'settings-grid' }, ...specs.map(([key, label]) => settingsField(label, inputs[key]))),
+    h('p', { class: 'settings-note', text: t('开启时至少间隔 30 秒。仅发送上一版摘要和新增转写；新增字数不足时跳过自动摘要，手动总结不受此限制。目标字数由模型遵循，可能略有超出。') }),
+    h('button', { class: 'btn tiny primary', text: t('保存配置'), onclick: () => {
+      if (specs.some(([key]) => !inputs[key].value || !inputs[key].checkValidity())) return showBanner(t('请输入有效的时间数值'), 'error');
+      settingsAction(() => patchConfig({ summary: {
+        autoMs: Number(inputs.autoMs.value) * 1000,
+        minNewChars: Number(inputs.minNewChars.value), maxChars: Number(inputs.maxChars.value),
+      } }), '设置已保存');
+    } }));
+}
+
+function isDeepSeekProvider(provider) {
+  try { return new URL(provider?.baseUrl).hostname === 'api.deepseek.com'; } catch { return false; }
+}
+
+// Selection is independent of discovery: services without GET /models still
+// accept exact model IDs. Never replace a user's edit when discovery completes.
+function modelPicker(category, initialProvider, current, catalog) {
+  let provider = initialProvider;
+  let generation = 0;
+  const manualId = '__manual_model__';
+  const input = h('input', { value: current, spellcheck: false, placeholder: t('输入模型 ID'), 'aria-label': t('输入模型 ID'), 'data-field': 'model-id' });
+  const select = h('select', { 'aria-label': t('选择模型'), 'data-field': 'model-select', onchange: () => {
+    input.hidden = select.value !== manualId;
+    if (input.hidden) input.value = select.value;
+  } });
+  const note = h('small', { class: 'settings-note', role: 'status' });
+  const value = () => select.value === manualId ? input.value.trim() : select.value;
+  const populate = (ids, selected, manual = false) => {
+    const names = [...new Set([selected, ...ids].filter(Boolean))];
+    select.replaceChildren(...names.map((id) => h('option', { value: id, text: isDeepSeekProvider(provider) && id === 'deepseek-flash'
+      ? 'DeepSeek 4.1 Flash · ' + id : isDeepSeekProvider(provider) && id === 'deepseek-v4-pro' ? 'DeepSeek V4 Pro · ' + id : id })),
+    h('option', { value: manualId, text: t('手动输入模型 ID') }));
+    select.value = !manual && selected ? selected : manualId;
+    input.value = selected || '';
+    input.hidden = select.value !== manualId;
+  };
+  const seeds = () => category === 'llm' && isDeepSeekProvider(provider) ? ['deepseek-flash', 'deepseek-v4-pro'] : [];
+  const load = async (refresh = false) => {
+    const ticket = ++generation;
+    const key = category + ':' + provider?.name + ':' + provider?.baseUrl;
+    note.textContent = t('连接中…');
+    try {
+      if (!provider) throw new Error(t('请先选择服务'));
+      if (refresh || !catalog.has(key)) {
+        const pending = (async () => {
+          const res = await fetch('/api/providers/' + category + '/' + encodeURIComponent(provider.name) + '/models');
+          const data = await res.json();
+          if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
+          return data.models || [];
+        })();
+        catalog.set(key, pending);
+        pending.catch(() => { if (catalog.get(key) === pending) catalog.delete(key); });
+      }
+      const models = await catalog.get(key);
+      if (ticket !== generation) return;
+      populate([...seeds(), ...models], value(), select.value === manualId);
+      note.textContent = models.length ? t('已读取模型列表') : t('没有返回模型，请手动填写模型 ID。');
+    } catch (err) {
+      if (ticket === generation) note.textContent = t('列表不可用，可手动输入模型 ID。') + ' ' + err.message;
+    }
+  };
+  populate(seeds(), current);
+  return {
+    element: h('div', { class: 'model-picker' }, select, input,
+      h('button', { type: 'button', class: 'btn tiny', text: t('读取模型列表'), onclick: () => load(true) }), note),
+    value,
+    setProvider(next) {
+      generation++;
+      provider = next;
+      populate(seeds(), seeds()[0] || '');
+      void load();
+    },
+  };
+}
+
+function taskModelSettings(roleName, role, providers, catalog) {
+  const labels = { summary: '摘要', minutes: '纪要', translate: '翻译', ask: '问答' };
+  const selectedProvider = () => providers.find((p) => p.name === provider.value);
+  const model = modelPicker('llm', providers.find((p) => p.name === role.provider), role.model || '', catalog);
+  const thinking = h('select', { 'data-field': 'thinking', 'aria-label': t('思考模式') },
+    ...[['default', '遵循服务默认'], ['disabled', '关闭思考（节省用量）'], ['enabled', '开启思考']].map(([value, label]) =>
+      h('option', { value, selected: value === (role.thinking || 'default'), text: t(label) })));
+  const provider = h('select', { 'data-field': 'provider', 'aria-label': t('服务'), onchange: () => {
+    model.setProvider(selectedProvider());
+    thinking.disabled = !isDeepSeekProvider(selectedProvider());
+  } }, ...providers.map((p) => h('option', { value: p.name, selected: p.name === role.provider, text: p.label + (p.enabled ? '' : ' · ' + t('未启用')) })));
+  thinking.disabled = !isDeepSeekProvider(selectedProvider());
+  return h('div', { class: 'task-model-card setting-card', 'data-task': roleName },
+    h('strong', { text: t(labels[roleName] || roleName) }),
+    h('div', { class: 'settings-grid' }, settingsField('服务', provider), settingsField('选择模型', model.element), settingsField('思考模式', thinking)),
+    h('button', { class: 'btn tiny primary', 'data-action': 'save-task', text: t('保存配置'), onclick: () => {
+      if (!model.value()) return showBanner(t('输入模型 ID'), 'warn');
+      settingsAction(() => patchConfig({ llm: { roles: { [roleName]: {
+        provider: provider.value, model: model.value(), thinking: thinking.value,
+      } } } }), '设置已保存');
+    } }));
+}
+
 function settingsField(label, input) {
-  return h('label', { class: 'settings-field' }, h('span', { text: t(label) }), input);
+  return h(input.tagName === 'DIV' ? 'div' : 'label', { class: 'settings-field' }, h('span', { text: t(label) }), input);
 }
 
 async function settingsAction(action, success) {
@@ -1520,7 +1638,7 @@ async function settingsAction(action, success) {
   } catch (err) { showBanner(err.message, 'error'); }
 }
 
-function providerCard(category, provider) {
+function providerCard(category, provider, catalog) {
   const id = category + '-' + provider.name;
   const card = h('div', { class: 'prov-block setting-card' });
   const enabled = h('input', { type: 'checkbox', checked: provider.enabled !== false, 'aria-label': t('启用') + ' ' + provider.label,
@@ -1535,7 +1653,7 @@ function providerCard(category, provider) {
   const baseUrl = h('input', { value: provider.baseUrl, type: 'url', spellcheck: false });
   const noAuth = h('input', { type: 'checkbox', checked: provider.noAuth,
     disabled: !['openai-audio', 'openai-chat'].includes(provider.kind) });
-  const model = category === 'asr' ? h('input', { value: provider.model || '', spellcheck: false }) : null;
+  const model = category === 'asr' ? modelPicker(category, provider, provider.model || '', catalog) : null;
   const languages = category === 'asr' ? h('input', { value: (provider.languages || []).join(', '), spellcheck: false }) : null;
   const kind = provider.custom ? h('select', { onchange: (e) => {
     noAuth.disabled = !['openai-audio', 'openai-chat'].includes(e.target.value);
@@ -1546,31 +1664,25 @@ function providerCard(category, provider) {
     : [['openai-chat', 'OpenAI Chat']]).map(([value, text]) =>
     h('option', { value, selected: value === provider.kind, text }))) : null;
   const key = h('input', { type: 'password', placeholder: provider.keyRef || 'API Key', autocomplete: 'new-password', spellcheck: false });
-  const modelList = h('div', { class: 'model-list' });
   const saveProvider = () => settingsAction(() => patchConfig({ [category]: { providers: { [provider.name]: {
     label: label.value.trim(), baseUrl: baseUrl.value.trim().replace(/\/+$/, ''), noAuth: noAuth.checked,
     ...(kind ? { kind: kind.value } : {}),
-    ...(category === 'asr' ? { model: model.value.trim(), languages: languages.value.split(/[\s,，]+/).filter(Boolean) } : {}),
+    ...(category === 'asr' ? { model: model.value(), languages: languages.value.split(/[\s,，]+/).filter(Boolean) } : {}),
   } } } }), '设置已保存');
   const details = h('details', { class: 'provider-details', open: state.settingsOpen.has(id),
     ontoggle: (e) => { if (e.target.open) state.settingsOpen.add(id); else state.settingsOpen.delete(id); } },
     h('summary', { text: t('连接设置') }),
     h('div', { class: 'settings-grid' },
       settingsField('引擎名称', label), kind ? settingsField('协议', kind) : null,
-      settingsField('接口地址', baseUrl), category === 'asr' ? settingsField('模型名称', model) : null,
+      settingsField('接口地址', baseUrl), category === 'asr' ? settingsField('模型名称', model.element) : null,
       category === 'asr' ? settingsField('支持语言', languages) : null,
       h('label', { class: 'settings-check' }, noAuth, t('无需 API Key'))),
     h('div', { class: 'settings-actions' },
       h('button', { class: 'btn tiny primary', text: t('保存配置'), onclick: saveProvider }),
-      category === 'llm' ? h('button', { class: 'btn tiny', text: t('查看模型'), onclick: async () => {
-        modelList.textContent = t('连接中…');
-        try {
-          const response = await fetch('/api/providers/llm/' + provider.name + '/models');
-          const data = await response.json();
-          if (data.error) throw new Error(data.error);
-          modelList.replaceChildren(...data.models.map((name) => h('code', { text: name })));
-          if (!data.models.length) modelList.textContent = t('没有返回模型，请手动填写模型 ID。');
-        } catch (err) { modelList.textContent = err.message; }
+      category === 'llm' ? h('button', { class: 'btn tiny', text: t('选择任务模型'), onclick: () => {
+        const target = els.drawerBody.querySelector('[data-task="summary"]');
+        target?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        target?.querySelector('select')?.focus({ preventScroll: true });
       } }) : null,
       provider.custom ? h('button', { class: 'btn tiny danger', text: t('移除'), onclick: () => {
         if (!confirm(t('删除这个自定义引擎？'))) return;
@@ -1582,7 +1694,6 @@ function providerCard(category, provider) {
           return json;
         }, '引擎已移除');
       } }) : null),
-    category === 'llm' ? modelList : null,
     h('div', { class: 'key-row' }, key,
       h('button', { class: 'btn tiny', text: t(provider.hasKey ? '更新密钥' : '保存密钥'), onclick: () => {
         if (!key.value.trim()) return showBanner(t('请先粘贴 API Key。'), 'warn');
@@ -1674,9 +1785,12 @@ async function boot() {
     /* browser storage remains available */
   }
   const savedMicrophone = desktopPreference?.deviceId || localStorage.getItem(MIC_STORAGE_KEY);
-  const systemSupported = desktop?.platform === 'win32' || (!desktop && !!navigator.mediaDevices?.getDisplayMedia);
+  const systemSupported = ['win32', 'darwin'].includes(desktop?.platform) || (!desktop && !!navigator.mediaDevices?.getDisplayMedia);
   els.systemAudioField.hidden = !systemSupported;
-  els.includeSystemAudio.checked = systemSupported && (desktopPreference?.includeSystemAudio ?? desktop?.platform === 'win32');
+  els.includeSystemAudio.checked = systemSupported && (desktopPreference?.includeSystemAudio ?? ['win32', 'darwin'].includes(desktop?.platform));
+  if (desktop?.platform === 'darwin') {
+    els.systemAudioField.title = t('首次使用会请求 macOS 的屏幕与系统音频录制权限；应用不会保存画面。');
+  }
   state.savedMicLabel = desktopPreference?.label || '';
   if (savedMicrophone && savedMicrophone !== 'default') {
     els.microphone.append(h('option', { value: savedMicrophone, text: '已保存的麦克风' }));

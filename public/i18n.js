@@ -13,6 +13,7 @@ const en = {
   '麦克风': 'Microphone', '系统默认麦克风': 'System default microphone',
   '刷新设备': 'Refresh devices', '测试麦克风': 'Test microphone', '结束测试': 'End test',
   '同时录电脑声音': 'Include computer audio', '上传音视频': 'Import audio/video',
+  '首次使用会请求 macOS 的屏幕与系统音频录制权限；应用不会保存画面。': 'macOS will request screen and system audio recording access the first time. The app does not save video.',
   '开始录音': 'Start recording', '暂停': 'Pause', '继续': 'Resume',
   '结束并生成纪要': 'Stop and create minutes', '实时转写': 'Live transcript',
   'AI 分角色': 'Detect speakers', '还没有转写内容。': 'No transcript yet.',
@@ -85,6 +86,7 @@ const ja = {
   '麦克风': 'マイク', '系统默认麦克风': 'システム既定のマイク',
   '刷新设备': '機器を更新', '测试麦克风': 'マイクをテスト', '结束测试': 'テストを終了',
   '同时录电脑声音': 'PC の音声も録音', '上传音视频': '音声・動画を読み込む',
+  '首次使用会请求 macOS 的屏幕与系统音频录制权限；应用不会保存画面。': '初回は macOS の画面・システム音声収録の許可が必要です。映像は保存しません。',
   '开始录音': '録音を開始', '暂停': '一時停止', '继续': '再開',
   '结束并生成纪要': '終了して議事録を作成', '实时转写': 'リアルタイム文字起こし',
   'AI 分角色': '話者を推定', '还没有转写内容。': '文字起こしはまだありません。',
@@ -145,6 +147,37 @@ const ja = {
   '没有任何可用的语音识别引擎，请检查密钥配置。': '利用可能な音声認識エンジンがありません。設定のキーを確認してください。',
   '可在设置中选择语音与文本模型，并配置本地服务。': '設定で音声・テキストモデルやローカルサービスを選択できます。',
 };
+
+// Model selection and cost controls share the same labels across task cards.
+for (const [zh, english, japanese] of [
+  ['自动摘要间隔（秒，0 为关闭）', 'Auto summary interval (seconds, 0 = off)', '自動要約の間隔（秒、0 で無効）'],
+  ['自动摘要最少新增字数', 'Minimum new characters for auto summary', '自動要約に必要な追加文字数'],
+  ['摘要目标字数', 'Target summary length (characters)', '要約の目標文字数'],
+  ['摘要与用量', 'Summary and usage', '要約と使用量'],
+  ['开启时至少间隔 30 秒。仅发送上一版摘要和新增转写；新增字数不足时跳过自动摘要，手动总结不受此限制。目标字数由模型遵循，可能略有超出。', 'When enabled, the minimum interval is 30 seconds. Only the previous summary and new transcript are sent. Automatic summaries wait for enough new text; manual summaries bypass this threshold. The model may exceed the target length.', '有効時は最短 30 秒間隔です。前回の要約と追加された文字起こしのみ送信します。追加文字数が不足すると自動要約をスキップしますが、手動要約は可能です。文字数は目安です。'],
+  ['输入模型 ID', 'Enter model ID', 'モデル ID を入力'],
+  ['选择模型', 'Select model', 'モデルを選択'],
+  ['手动输入模型 ID', 'Enter model ID manually', 'モデル ID を手動入力'],
+  ['请先选择服务', 'Select a provider first', '先にサービスを選択してください'],
+  ['已读取模型列表', 'Model list loaded', 'モデル一覧を取得しました'],
+  ['列表不可用，可手动输入模型 ID。', 'List unavailable. You can enter a model ID manually.', '一覧を取得できません。モデル ID は手動で入力できます。'],
+  ['读取模型列表', 'Load model list', 'モデル一覧を取得'],
+  ['思考模式', 'Thinking mode', '思考モード'],
+  ['遵循服务默认', 'Provider default', 'サービスの既定値'],
+  ['关闭思考（节省用量）', 'Off (lower usage)', '無効（使用量を節約）'],
+  ['开启思考', 'On', '有効'],
+  ['服务', 'Provider', 'サービス'],
+  ['未启用', 'Disabled', '無効'],
+  ['选择任务模型', 'Choose task models', 'タスクのモデルを選択'],
+  ['为每个任务选择服务和模型；列表不可用时可手动输入模型 ID。思考开关仅适用于 DeepSeek 官方接口。', 'Choose a provider and model for each task. If discovery is unavailable, enter the model ID manually. The thinking switch applies only to the official DeepSeek API.', 'タスクごとにサービスとモデルを選択できます。一覧を取得できない場合はモデル ID を手動入力してください。思考設定は DeepSeek 公式 API のみに適用されます。'],
+  ['文本请求（含重试）', 'Text requests (including retries)', 'テキストリクエスト（再試行を含む）'],
+  ['其中思考 token（服务返回）', 'Of which thinking tokens (reported)', 'うち思考トークン（サービス報告値）'],
+  ['缓存命中输入 token', 'Cached input tokens', 'キャッシュ済み入力トークン'],
+  ['未单独报告', 'Not reported separately', '個別の報告なし'],
+  ['未返回完整用量的请求', 'Requests with incomplete usage data', '使用量が未報告のリクエスト'],
+  ['用量说明', 'Usage note', '使用量について'],
+  ['旧会议用量不完整，仅新增请求按任务统计。', 'Legacy usage is incomplete. Only new requests have per-task counts.', '旧バージョンの使用量は不完全です。新規リクエストのみタスク別に集計します。'],
+]) { en[zh] = english; ja[zh] = japanese; }
 
 export function translate(key, language = 'zh') {
   return (language === 'en' ? en : language === 'ja' ? ja : {})[key] || key;
