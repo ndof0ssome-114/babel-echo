@@ -12,7 +12,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const temp = mkdtempSync(join(tmpdir(), 'miaoji-regressions-'));
 process.env.MIAOJI_DATA_DIR = temp;
 process.env.MIAOJI_CONFIG_PATH = join(temp, 'config.json');
-process.env.DSH_HOME = join(temp, 'dsh');
 
 let server;
 try {

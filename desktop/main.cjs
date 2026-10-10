@@ -92,7 +92,7 @@ function startServer() {
         MIAOJI_PARENT_WATCHDOG: '1',
         MIAOJI_DATA_DIR: DATA_DIR,
         MIAOJI_CONFIG_PATH: path.join(DATA_DIR, 'config.json'),
-        ...((SELFTEST || CAPTURE) ? { DSH_HOME: path.join(DATA_DIR, 'qa-credentials') } : {}),
+        ...((SELFTEST || CAPTURE) ? { MIAOJI_ALLOW_ENV_CREDENTIALS: '0' } : {}),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -232,6 +232,24 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  win.webContents.on('context-menu', (_event, params) => {
+    const edit = params.editFlags;
+    const items = params.isEditable ? [
+      { role: 'undo', label: '撤销', enabled: edit.canUndo },
+      { role: 'redo', label: '重做', enabled: edit.canRedo },
+      { type: 'separator' },
+      { role: 'cut', label: '剪切', enabled: edit.canCut },
+      { role: 'copy', label: '复制', enabled: edit.canCopy },
+      { role: 'paste', label: '粘贴', enabled: edit.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', label: '全选' },
+    ] : params.selectionText ? [
+      { role: 'copy', label: '复制', enabled: edit.canCopy },
+      { role: 'selectAll', label: '全选' },
+    ] : [];
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
+  });
+
   win.loadURL(serverUrl + (OPEN_QUERY ? '?' + OPEN_QUERY + (SELFTEST ? '&selftest=1' : '') : SELFTEST ? '?selftest=1' : ''));
   if (IS_DEV) win.webContents.openDevTools({ mode: 'detach' });
 }
@@ -367,6 +385,19 @@ function buildMenu() {
         { label: '导入音视频…', accelerator: 'CommandOrControl+O', click: () => sendToRenderer('miaoji:import') },
         { type: 'separator' },
         { role: 'quit', label: '退出' },
+      ],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'pasteAndMatchStyle', label: '粘贴并匹配样式' },
+        { role: 'selectAll', label: '全选' },
       ],
     },
     {
@@ -763,6 +794,11 @@ async function runSelfTest() {
 
   try {
     check('window created', !win.isDestroyed());
+    const editMenu = Menu.getApplicationMenu()?.items.find((item) => item.label === '编辑');
+    check('native edit menu exposes copy and paste',
+      ['copy', 'paste', 'selectall'].every((role) => editMenu?.submenu?.items.some((item) => item.role === role)),
+      JSON.stringify(editMenu?.submenu?.items.map((item) => ({ label: item.label, role: item.role }))));
+    check('text context menu is registered', win.webContents.listenerCount('context-menu') > 0);
     check('server handshake returned a URL', !!serverUrl, serverUrl);
     check('server process is running', !!server && server.exitCode === null);
     check('recording global shortcut registered', !!shortcuts.toggle, String(shortcuts.toggle));

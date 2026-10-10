@@ -6,7 +6,7 @@
 
 **Turn meeting audio into notes you can revisit.** Babel Echo is a local AI meeting workspace for Windows and Apple Silicon Macs. It can capture your microphone and computer audio together, transcribe as you record, and generate summaries, minutes, and translations.
 
-**源码版本 / Source version:** `0.1.0-beta.4` · 测试中 / in testing · [已发布安装包 beta.3 / Published beta.3](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3)
+**源码版本 / Source version:** `0.1.0-beta.5` · 预发布 / prerelease · [beta.5 下载 / Download beta.5](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.5)
 
 [简体中文](#简体中文) · [English](#english) · [开发者与 AI 接手文档 / Developer & AI guide](README_AI.md)
 
@@ -24,7 +24,7 @@
 
 ### 开始使用
 
-**安装版：** 从 [预发布页面](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3) 下载 `BabelEcho-0.1.0-beta.3-setup.exe`，在向导中选择安装范围和目录。安装包目前未签名。首次录音前：
+**安装版：** 从 [预发布页面](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.5) 下载 `BabelEcho-0.1.0-beta.5-setup.exe`，在向导中选择安装范围和目录。安装包目前未签名。首次录音前：
 
 1. 打开「设置」，配置语音识别和文本模型；使用云端服务时填写相应的 API Key。若使用本地模型，请先自行启动模型服务并加载模型。
 2. 选择识别语言与麦克风，点击「测试麦克风」确认有输入。需要录入会议播放声时，勾选「同时录电脑声音」。
@@ -48,7 +48,13 @@ npm start
 
 仓库中的 **Build macOS Apple Silicon** 手动工作流可生成内部测试包；启用 signed 输入前，需要在 GitHub Actions 配置 `MAC_CSC_LINK`、`MAC_CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`。未签名包只适合内部测试，公开下载应使用 Developer ID 签名并完成 Apple 公证。
 
-### 选择模型与控制用量（beta.4）
+### beta.5 更新与升级
+
+桌面版新增原生编辑菜单和文本右键菜单，支持撤销、剪切、复制、粘贴和全选。API Key 默认只读取在巴别回声设置中保存的值，不再自动读取 DeepSeek Harness 的凭据文件或进程环境变量。升级后若之前只依赖其他应用的密钥，请在巴别回声设置中重新输入；原凭据文件与已保存会议不会被修改或删除。源码运行者只有显式设置 `MIAOJI_ALLOW_ENV_CREDENTIALS=1` 时才会启用环境变量密钥。
+
+[beta.5 预发布](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.5)提供新安装包及 SHA-256 校验文件。Mac 包通过云端构建，未使用 Apple Developer ID 签名或公证；Windows 安装包也未进行代码签名。新安装包的 Mac 真机录音、权限和菜单交互仍需复测，构建成功不代表这些行为已经验证。
+
+### 选择模型与控制用量（beta.4 起）
 
 在「设置 → 任务模型」中，为摘要、翻译、纪要和问答分别选择服务与模型。DeepSeek 可直接选 Flash 或 Pro；其他服务可点击「读取模型列表」。列表不可用时选择「手动输入模型 ID」，填写服务提供的准确 ID，然后保存。更改接口地址或密钥后先保存，再读取列表。语音引擎的「连接设置」也支持模型列表与手动输入。
 
@@ -82,7 +88,7 @@ npm start
 
 ### Get started
 
-**Installer:** Download `BabelEcho-0.1.0-beta.3-setup.exe` from the [prerelease page](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3), then choose the installation scope and directory. The installer is currently unsigned. Before recording:
+**Installer:** Download `BabelEcho-0.1.0-beta.5-setup.exe` from the [prerelease page](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.5), then choose the installation scope and directory. The installer is currently unsigned. Before recording:
 
 1. Open Settings and configure speech and text models. Add API keys for cloud providers. For local models, start the service and load the model yourself.
 2. Choose the recognition language and microphone, then use **Test microphone** to check the input. Enable **Capture computer audio** if you also need meeting playback.
@@ -106,7 +112,13 @@ npm start
 
 The manual **Build macOS Apple Silicon** workflow creates internal test artifacts. A public build should be signed with a Developer ID certificate and notarized by Apple; the workflow supports this after the repository secrets documented in the Chinese section are configured.
 
-### Models and usage controls (beta.4)
+### beta.5 update and upgrade
+
+The desktop app adds native editing and text context menus for undo, cut, copy, paste, and select all. API keys now come only from Babel Echo Settings by default. DeepSeek Harness credential files and ambient environment keys are no longer read automatically. If you previously relied on those sources, enter your keys in Babel Echo Settings after upgrading. Other applications' credential files and saved meetings are preserved. Source users can explicitly enable environment keys with `MIAOJI_ALLOW_ENV_CREDENTIALS=1`.
+
+The [beta.5 prerelease](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.5) provides new packages and SHA-256 checksums. The Mac package is cloud-built without Apple Developer ID signing or notarization; the Windows installer is also unsigned. Recording, permissions, and menu interactions in the new Mac package still require physical Mac testing. A successful build does not verify those behaviors.
+
+### Models and usage controls (since beta.4)
 
 Under **Settings → Task models**, choose a provider and model separately for summaries, translation, minutes, and Q&A. DeepSeek offers Flash and Pro directly. Use **Load model list** for other providers, or **Enter model ID manually** when discovery is unavailable. Save endpoint or key changes before loading the list. Speech providers offer the same selection under Connection settings.
 

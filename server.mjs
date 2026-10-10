@@ -13,7 +13,7 @@ import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { join, extname, normalize } from 'node:path';
 import { loadConfig, saveConfig, deleteCustomProvider, ensureDirs, providerStatus, ROOT, UPLOAD_DIR, DEFAULT_CONFIG } from './lib/config.mjs';
-import { loadCreds, setLocalCred, LOCAL_CRED_PATH, CRED_PATH } from './lib/env.mjs';
+import { loadCreds, setLocalCred, LOCAL_CRED_PATH } from './lib/env.mjs';
 import { createAsrRegistry } from './lib/asr/index.mjs';
 import { createLlm } from './lib/llm.mjs';
 import { Meeting, toMarkdown, toVtt, formatDuration } from './lib/meeting.mjs';
@@ -251,7 +251,7 @@ async function handleApi(req, res, url) {
     if (method === 'GET') {
       // Report which refs are satisfied, never the values themselves.
       return sendJson(res, 200, {
-        sources: { central: CRED_PATH, local: LOCAL_CRED_PATH },
+        sources: { local: LOCAL_CRED_PATH, environment: process.env.MIAOJI_ALLOW_ENV_CREDENTIALS === '1' },
         configured: Object.keys(creds).filter((k) => /^[A-Z][A-Z0-9_]*$/.test(k)),
       });
     }

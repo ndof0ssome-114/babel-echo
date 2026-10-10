@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +11,9 @@ process.env.MIAOJI_DATA_DIR = temp;
 process.env.MIAOJI_CONFIG_PATH = join(temp, 'config.json');
 process.env.DSH_HOME = join(temp, 'dsh');
 process.env.MIAOJI_TEST_KEY = 'from-env';
+delete process.env.MIAOJI_ALLOW_ENV_CREDENTIALS;
+mkdirSync(process.env.DSH_HOME);
+writeFileSync(join(process.env.DSH_HOME, '.credentials.yaml'), 'refs:\n  MIAOJI_DSH_TEST_KEY: from-dsh\n');
 
 const { loadConfig, saveConfig, deleteCustomProvider, providerStatus, pickAsrProvider } = await import('../lib/config.mjs');
 const { loadCreds, setLocalCred } = await import('../lib/env.mjs');
@@ -21,12 +24,21 @@ let mock;
 let appServer;
 try {
   const creds = loadCreds();
-  assert.equal(creds.MIAOJI_TEST_KEY, 'from-env');
+  assert.equal(creds.MIAOJI_TEST_KEY, undefined, 'ambient environment keys must be ignored');
+  assert.equal(creds.MIAOJI_DSH_TEST_KEY, undefined, 'other applications\' key stores must be ignored');
   setLocalCred('MIAOJI_TEST_KEY', 'from-ui');
-  assert.equal(creds.MIAOJI_TEST_KEY, 'from-ui', 'UI key should override environment immediately');
+  assert.equal(creds.MIAOJI_TEST_KEY, 'from-ui', 'UI key should take effect immediately');
   setLocalCred('MIAOJI_TEST_KEY', '');
-  assert.equal(creds.MIAOJI_TEST_KEY, 'from-env', 'clearing local key should restore environment key');
-  console.log('PASS key update and removal preserve the effective credential order');
+  assert.equal(creds.MIAOJI_TEST_KEY, undefined, 'clearing local key must not expose ambient keys');
+  process.env.MIAOJI_ALLOW_ENV_CREDENTIALS = '1';
+  setLocalCred('MIAOJI_TEST_KEY', '');
+  assert.equal(creds.MIAOJI_TEST_KEY, 'from-env', 'explicit opt-in should enable environment keys');
+  setLocalCred('MIAOJI_TEST_KEY', 'from-ui');
+  assert.equal(creds.MIAOJI_TEST_KEY, 'from-ui', 'UI key should override an opted-in environment key');
+  delete process.env.MIAOJI_ALLOW_ENV_CREDENTIALS;
+  setLocalCred('MIAOJI_TEST_KEY', '');
+  assert.equal(creds.MIAOJI_TEST_KEY, undefined, 'disabling opt-in should remove environment keys');
+  console.log('PASS credentials stay app-local unless environment access is enabled');
 
   let seenAuth = null;
   let seenModel = null;
