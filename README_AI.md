@@ -5,7 +5,7 @@
 这里保留项目架构、协议、数据模型、测试流程、已知限制与排障记录。
 接手修改代码前，**请先读 §3「接手须知」**，再查阅相关章节中的不变量和已踩过的坑。
 
-**源码版本：`0.1.0-beta.4`（测试中，已发布安装包仍为 beta.3）。** 尚未发布正式稳定版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
+**源码版本：`0.1.0-beta.5`（预发布）。** 尚未发布正式稳定版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
 
 品牌图标根据项目使用者提供的角色参考图生成，源图与各尺寸图标见 `desktop/build/`。仓库公开不表示授予第三方复用该角色或图标的许可；再分发前应确认相应授权。
 
@@ -82,7 +82,8 @@ node server.mjs 8777          # 或 .\start.ps1
 # 打开 http://127.0.0.1:8777
 ```
 
-密钥可在「设置」中保存，也可从环境变量或 `~/.dsh/.credentials.yaml` 读取。首次使用云端模型时需要配置对应的密钥。
+密钥默认只从「设置」中保存的本应用凭据读取。仅在显式设置 `MIAOJI_ALLOW_ENV_CREDENTIALS=1` 时，才额外读取以 `_KEY` 结尾的环境变量；不读取 DeepSeek Harness 或其他应用的凭据文件。首次使用云端模型时需要配置对应的密钥。
+Electron 桌面窗口提供原生「编辑」菜单和文本右键菜单，可在输入框及已选文字上使用撤销、剪切、复制、粘贴和全选。beta.5 的 Mac 包通过手动 Build macOS Apple Silicon 工作流构建；未使用 Developer ID 签名或公证。新安装包的菜单、鼠标操作、音频与系统权限仍需在目标系统复测。Windows Electron 自检 51/51 与 7 组离线回归通过。
 
 录音前可在顶部「麦克风」下拉框选择输入设备；点击「刷新设备」可授权并显示设备名称。点击「测试麦克风」并说话，确认音量条有反应。Windows 与 macOS 13+ 桌面版默认勾选「同时录电脑声音」，把所选麦克风与系统播放声音混合录入；可在开始前取消勾选。macOS 会请求屏幕与系统音频权限，但取得音频轨道后立即停止视频轨道，不保存或传输画面。
 录音中也可切换，界面会显示实际连接的麦克风。桌面版会记住选择，并在下次启动时按设备名称重新匹配。
@@ -121,9 +122,9 @@ npm start
 
 ```powershell
 cd desktop
-npm run dist              # → ../dist/BabelEcho-0.1.0-beta.4-setup.exe（安装向导）
-npm run dist:portable     # → ../dist/BabelEcho-0.1.0-beta.4-portable.exe（单文件）
-npm run dist:mac          # → ../dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg / .zip（需在 Mac 上运行）
+npm run dist              # → ../dist/BabelEcho-0.1.0-beta.5-setup.exe（安装向导）
+npm run dist:portable     # → ../dist/BabelEcho-0.1.0-beta.5-portable.exe（单文件）
+npm run dist:mac          # → ../dist/BabelEcho-0.1.0-beta.5-mac-arm64.dmg / .zip（需在 Mac 上运行）
 ```
 
 安装版会弹出向导，选择安装范围和目录后再安装；已有安装升级时沿用原目录。卸载会先确认，再询问是否保留本机会议录音、转写、存档和设置，默认保留；选择删除才会在卸载完成后移除当前用户的应用数据（包括 API Key）。静默卸载和版本升级始终保留数据。
@@ -207,7 +208,7 @@ babel-echo/
 ├── lib/
 │   ├── ws.mjs                  手写 RFC6455 WebSocket 服务端
 │   ├── wav.mjs                 WAV 头读写、Float32→Int16、RMS、静音切片
-│   ├── env.mjs                 凭据加载（env > DSH > 本地）+ 本地凭据写入
+│   ├── env.mjs                 本应用凭据加载/写入 + 显式选择的环境变量
 │   ├── config.mjs              配置默认值 / 加载 / 原地保存 / provider 状态
 │   ├── llm.mjs                 LLM 客户端（固定输出上限、逐次用量、JSON 修复）
 │   ├── prompts.mjs             全部提示词，改提示词只改这个文件
@@ -479,16 +480,15 @@ MiMo 特例：只允许明确的中文和英文请求；日语不会回退到 Mi
 
 ### 7.3 凭据（`lib/env.mjs`）
 
-三个来源，**优先级从高到低**：
+默认只使用本应用凭据。选择启用环境变量时，**优先级从高到低**：
 
 | 优先级 | 来源 | 用途 |
 | --- | --- | --- |
 | 1 | `data/credentials.json` | **设置界面保存的 key；更新后立即生效** |
-| 2 | 进程环境变量 | CI / 临时配置 |
-| 3 | `~/.dsh/.credentials.yaml` 的 `refs:` 段 | 本机集中管理（DSH 原生） |
+| 2 | 进程环境变量中以 `_KEY` 结尾的名称 | 仅 `MIAOJI_ALLOW_ENV_CREDENTIALS=1` 时用于 CLI / 临时配置 |
 
 `config.json` **只存 `keyRef`（变量名），永远不存 key 的值**。
-`POST /api/credentials` 只写第 1 层，绝不触碰用户的 DSH 配置。清除界面保存的 key 后，会重新使用环境变量或 DSH 中的值。
+`POST /api/credentials` 只写第 1 层，不读取或修改其他应用的密钥文件。清除界面保存的 key 后，默认视为未配置；只有显式启用环境变量时才可能使用对应环境密钥。升级前若只依赖 `~/.dsh/.credentials.yaml`，须在设置里自行输入密钥；旧文件不会被修改或删除。
 
 已知的 key 名：`XIAOMI_API_KEY`、`DEEPSEEK_API_KEY`、`GROQ_API_KEY`、
 `DEEPGRAM_API_KEY`、`LOCAL_ASR_KEY`、`LOCAL_LLM_KEY`。
@@ -559,7 +559,7 @@ data/
 | --- | --- | --- | --- |
 | GET | `/api/config` | — | 完整 config 对象 |
 | POST/PATCH | `/api/config` | 部分 config（深合并） | `{ok:true, status}` |
-| GET | `/api/credentials` | — | `{sources:{central,local}, configured:[名字]}`（**不含值**） |
+| GET | `/api/credentials` | — | `{sources:{local,environment}, configured:[名字]}`（**不含值**） |
 | POST | `/api/credentials` | `{name,value}` | `{ok:true, name, configured, status}` |
 
 `value` 传空字符串 = 删除该凭据。`name` 必须是 `/^[A-Z][A-Z0-9_]*$/`。
@@ -696,10 +696,10 @@ providerStatus(config, creds) → {asr[], llm[], routes, active, roles, realtime
 ### `lib/env.mjs`
 
 ```js
-loadCreds()                  → {NAME: value}   // 合并三个来源，带缓存
+loadCreds()                  → {NAME: value}   // 本应用凭据 + 显式启用的环境变量，带缓存
 cred(name)                   → string          // 取不到就抛错
 setLocalCred(name, value)    → {name, configured}  // 写 data/credentials.json 并热更新缓存
-LOCAL_CRED_PATH, CRED_PATH   // 两个来源的绝对路径
+LOCAL_CRED_PATH              // 本应用凭据的绝对路径
 ```
 
 ### `lib/llm.mjs`
@@ -1179,7 +1179,7 @@ npx electron . --capture=../.probe/shot.png --open=meeting=<id>&settings=1
 | `MIAOJI_CONFIG_PATH` | 覆盖 config.json 路径 |
 | `MIAOJI_PARENT_WATCHDOG=1` | stdin 关闭即退出（Electron 子进程用） |
 | `ELECTRON_RUN_AS_NODE=1` | 让 Electron 二进制当纯 Node 跑 |
-| `DSH_HOME` | 覆盖 `~/.dsh`（凭据文件位置） |
+| `MIAOJI_ALLOW_ENV_CREDENTIALS=1` | 显式允许读取以 `_KEY` 结尾的进程环境变量；默认关闭 |
 
 ### 15.3 启动握手协议
 
@@ -1196,9 +1196,9 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
 
 | 命令 | 产物 | 大小 |
 | --- | --- | --- |
-| `npm run dist` / `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.4-setup.exe` | — |
-| `npm run dist:portable` | `dist/BabelEcho-0.1.0-beta.4-portable.exe` | ~100MB |
-| `npm run dist:mac` | `dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg` + `.zip` | 仅 M 芯片；公开分发前签名并公证 |
+| `npm run dist` / `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.5-setup.exe` | — |
+| `npm run dist:portable` | `dist/BabelEcho-0.1.0-beta.5-portable.exe` | ~100MB |
+| `npm run dist:mac` | `dist/BabelEcho-0.1.0-beta.5-mac-arm64.dmg` + `.zip` | 仅 M 芯片；公开分发前签名并公证 |
 | `npm run dist:dir` | `dist/win-unpacked/`（免安装目录） | ~368MB |
 
 打包时 `server.mjs` / `lib/` / `public/` 作为 `extraResources` 进 `resources/`，
