@@ -6,7 +6,7 @@
 
 **Turn meeting audio into notes you can revisit.** Babel Echo is a local AI meeting workspace for Windows and Apple Silicon Macs. It can capture your microphone and computer audio together, transcribe as you record, and generate summaries, minutes, and translations.
 
-**源码版本 / Source version:** `0.1.0-beta.9` · 私有测试版 / private testing · [安装包与 Mac 测试资料 / Packages and Mac test kit](https://github.com/ndof0ssome-114/babelecho-monorepo/releases/tag/desktop-v0.1.0-beta.9)
+**源码版本 / Source version:** `0.1.0-beta.10` · 公开预发布 / public prerelease · [下载安装包 / Downloads](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.10)
 
 [简体中文](#简体中文) · [English](#english) · [开发者与 AI 接手文档 / Developer & AI guide](README_AI.md)
 
@@ -24,7 +24,7 @@
 
 ### 开始使用
 
-**安装版：** 从 [私有预发布页面](https://github.com/ndof0ssome-114/babelecho-monorepo/releases/tag/desktop-v0.1.0-beta.7) 下载 `BabelEcho-0.1.0-beta.7-setup.exe`，在向导中选择安装范围和目录。安装包目前未签名。首次录音前：
+**安装版：** 从 [Releases 页面](https://github.com/ndof0ssome-114/babel-echo/releases) 下载最新的 `BabelEcho-<版本>-setup.exe`（Windows）或 `-mac-arm64.dmg`（Apple 芯片 Mac），在向导中选择安装范围和目录。安装包目前未签名。首次录音前：
 
 1. 打开「设置」，配置语音识别和文本模型；使用云端服务时填写相应的 API Key。若使用本地模型，请先自行启动模型服务并加载模型。
 2. 选择识别语言与麦克风，点击「测试麦克风」确认有输入。需要录入会议播放声时，勾选「同时录电脑声音」。
@@ -109,7 +109,7 @@ beta.8 修复 Mac 独立阅读器 Dock 激活误开工作台，并为应用和 H
 
 ### Get started
 
-**Installer:** Download `BabelEcho-0.1.0-beta.7-setup.exe` from the [private prerelease](https://github.com/ndof0ssome-114/babelecho-monorepo/releases/tag/desktop-v0.1.0-beta.7), then choose the installation scope and directory. The installer is currently unsigned. Before recording:
+**Installer:** Download the latest `BabelEcho-<version>-setup.exe` (Windows) or `-mac-arm64.dmg` (Apple silicon Mac) from [Releases](https://github.com/ndof0ssome-114/babel-echo/releases), then choose the installation scope and directory. The installer is currently unsigned. Before recording:
 
 1. Open Settings and configure speech and text models. Add API keys for cloud providers. For local models, start the service and load the model yourself.
 2. Choose the recognition language and microphone, then use **Test microphone** to check the input. Enable **Capture computer audio** if you also need meeting playback.

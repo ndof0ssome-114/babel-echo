@@ -5,7 +5,7 @@
 这里保留项目架构、协议、数据模型、测试流程、已知限制与排障记录。
 接手修改代码前，**请先读 §3「接手须知」**，再查阅相关章节中的不变量和已踩过的坑。
 
-**源码版本：`0.1.0-beta.9`（私有测试版）。** 源码采用根目录 Apache-2.0 许可证，尚未发布稳定版。安装包、合成测试素材与 Mac 交接说明见 [私有预发布](https://github.com/ndof0ssome-114/babelecho-monorepo/releases/tag/desktop-v0.1.0-beta.9) 和 [Mac 测试交接](../../docs/MAC_TESTING.md)。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
+**源码版本：`0.1.0-beta.10`（公开预发布）。** 源码采用根目录 Apache-2.0 许可证，尚未发布稳定版。安装包见 [Releases](https://github.com/ndof0ssome-114/babel-echo/releases)。本仓库是私有开发仓库中 `apps/desktop` 的发布快照，开发在私有仓库进行，每次公开发布时同步。
 
 统一验证入口为 `npm run test:offline`（语法检查及 13 组离线测试），推送或 PR 到 `main` 时由根目录 `.github/workflows/desktop-ci.yml` 在 Windows 与 Ubuntu 上运行。Electron/打包依赖建议 Node.js 24 LTS；核心服务最低 Node.js 20。Mac CI 位于根 `.github/workflows/desktop-macos.yml`，不在本应用子目录；`desktop-v*` 标签生成未签名测试包和不含用户数据的测试资料，真机验证仍须执行 Mac 交接清单。
 
