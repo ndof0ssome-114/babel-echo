@@ -1,6 +1,6 @@
 {
   "name": "babel-echo",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.10",
   "private": true,
   "type": "module",
   "description": "巴别回声 — AI 会议记录工作台：实时转写 / 实时总结 / 智能纪要 / 逐句翻译 / 会议问答",
@@ -8,6 +8,10 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "assets:markdown": "node scripts/build-markdown-vendor.mjs",
+    "test:markdown": "node scripts/test-markdown.mjs",
+    "desktop:reader": "npm --prefix desktop start -- --reader",
+    "test:offline": "node scripts/test-offline.mjs",
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
     "app": "powershell -ExecutionPolicy Bypass -File ./start-app.ps1",
@@ -18,9 +22,16 @@
     "fixture": "node scripts/make-fixture.mjs",
     "test:adapters": "node scripts/test-adapters.mjs",
     "test:regressions": "node scripts/test-regressions.mjs",
+    "test:storage": "node scripts/test-storage.mjs",
     "test:llm-cost": "node scripts/test-llm-cost.mjs",
     "test:local-access": "node scripts/test-local-access.mjs",
+    "test:appearance": "node scripts/test-appearance.mjs",
     "test:e2e": "node scripts/e2e.mjs",
-    "test:import": "node scripts/test-import.mjs"
+    "test:import": "node scripts/test-import.mjs",
+    "test:notes": "node scripts/test-notes.mjs",
+    "test:recording-lifecycle": "node scripts/test-recording-lifecycle.mjs",
+    "test:sentences": "node scripts/test-sentences.mjs",
+    "test:quick-setup": "node scripts/test-quick-setup.mjs",
+    "test:review-fixes": "node scripts/test-review-fixes.mjs"
   }
 }

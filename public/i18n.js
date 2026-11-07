@@ -3,6 +3,10 @@
 export const LANGUAGES = { zh: '简体中文', ja: '日本語', en: 'English' };
 
 const en = {
+  "字幕 SRT": "SRT captions",
+  "导出": "Export", "打开或录制一场会议后可以导出。": "Open or record a meeting to export it.", "结束录音": "Stop recording", "更多选项": "More options", "结束后自动生成纪要": "Create minutes when recording stops", "去设置": "Open settings", "正在生成纪要…": "Creating minutes…", "正在生成课程笔记…": "Creating class notes…", "查看纪要": "View minutes", "查看课程笔记": "View class notes", "生成课程笔记": "Create class notes", "录音已结束": "Recording finished", "关闭": "Close", "正在生成…": "Generating…", "点击更改说话人": "Click to change the speaker", "新说话人名字": "New speaker name", "重命名": "Rename", "已有同名说话人，两者会合并。继续吗？": "A speaker with this name already exists; the two will be merged. Continue?", "更改说话人": "Change speaker", "这句话的说话人": "Speaker of this sentence", "设为新说话人": "Set as new speaker", "重命名「": "Rename “", "」（共 ": "” (", " 句）": " sentences)", "全部改名": "Rename all", "句": "sentences", "合并到": "Merge into", "合并到…": "Merge into…",
+  "、": ", ", "快速设置": "Quick setup", "高级设置": "Advanced", "外观": "Appearance", "文本任务": "Text tasks", "不可用：": "Unavailable: ", "未配置": "Not set up", "未启用": "Off", "已就绪": "Ready", "已启用": "Enabled", "已停用": "Disabled", "测试连接": "Test connection", "停用": "Turn off", "用于：": "Used for: ", "确认": "Confirm", "不可用": "unavailable", "日本語": "Japanese", "保存中…": "Saving…", "已自动保存": "Saved automatically", "文本模型与任务": "Text models and tasks", "1. 语音识别": "1. Speech recognition", "至少配置一个": "Set up at least one", "粘贴 API Key 后自动启用，并按语言自动选择引擎。": "Paste an API key to turn a service on; the engine for each language is chosen automatically.", "2. 文本模型": "2. Text model", "摘要 · 纪要 · 翻译 · 问答": "Summary · minutes · translation · Q&A", "3. 说话人区分（可选）": "3. Speaker separation (optional)", "需要自定义接口、调整识别节奏或给每个任务单独选模型？": "Need a custom endpoint, different timing, or a model per task?", "打开高级设置": "Open advanced settings", "粘贴 API Key": "Paste API key", "保存并启用": "Save and turn on", "已保存并启用": "Saved and turned on", "连接成功": "Connected", "个模型": "models", "部分服务不提供模型列表，失败不一定代表密钥无效。": "Some services have no model list, so a failure does not always mean the key is wrong.", "更换密钥": "Replace key", "所有任务改用此服务": "Use for all tasks", "整段录音会再发送给 Deepgram 一次，按时长计费；可在转写区撤销。": "The whole recording is sent to Deepgram once more, billed by duration; you can undo it in the transcript.", "先在上方配置 Deepgram 密钥（无需设为主要识别引擎）。": "Add a Deepgram key above first (it does not have to be your main engine).", "设置项会自动保存；连接设置和密钥需要点击保存。": "Options save automatically; connection details and keys save when you click Save.", "适合中文和英文会议": "Best for Chinese and English meetings", "适合日语和多语言，价格最低": "Best for Japanese and other languages; lowest price", "能区分说话人，也用于整场说话人校正": "Separates speakers; also used to correct speakers afterwards", "免费离线，需要先在本机启动 whisper.cpp 服务": "Free and offline; start a whisper.cpp server on this computer first", "推荐：摘要、纪要、翻译和问答": "Recommended for summaries, minutes, translation and Q&A", "与小米语音识别共用同一个密钥": "Shares its key with Xiaomi speech recognition", "免费离线，需要先启动 Ollama 或 LM Studio": "Free and offline; start Ollama or LM Studio first", "还需要配置语音识别": "Speech recognition still needs setting up", "可以转写；摘要、纪要和翻译还需要文本模型": "Transcription works; summaries, minutes and translation need a text model", "一切就绪，可以开始录音": "All set — you can start recording",
+  "整场校正说话人": "Correct speakers", "撤销校正": "Undo correction", "把整段录音交给 Deepgram 重新区分说话人（额外计费一次）": "Send the whole recording to Deepgram to separate speakers again (billed once more)", "恢复校正前的说话人标注": "Restore the speaker labels from before the correction", "恢复校正前的说话人标注？": "Restore the speaker labels from before the correction?", "正在用整段录音校正说话人…": "Correcting speakers from the whole recording…", "说话人已校正": "Speakers corrected", "位说话人": "speakers", "段有变化": "segments changed", "将把整段录音发送给 Deepgram 重新区分说话人，按音频时长计费一次": "The whole recording will be sent to Deepgram to separate speakers, billed once by duration", "转写文字和翻译不变，可以撤销。继续吗？": "Transcript text and translations stay the same, and you can undo. Continue?", "说话人校正": "Speaker correction", "可用": "Ready", "需要 Deepgram 密钥": "Needs a Deepgram key", "录音或导入结束后自动用整段录音校正说话人": "Correct speakers from the whole recording after each recording or import", "逐句识别时，每次请求都会重新给说话人编号，所以大多数句子会被标成说话人1。校正会把整段录音再发送给 Deepgram 一次（按时长计费），按时间重新分配说话人；文字和翻译不变，可撤销。也可以在转写区手动点击「整场校正说话人」。": "Sentence-by-sentence recognition numbers speakers afresh in every request, so most sentences end up as Speaker 1. Correction sends the whole recording to Deepgram once more (billed by duration) and reassigns speakers by time; text and translations stay the same and you can undo. You can also click \"Correct speakers\" in the transcript.",
   '巴别回声': 'Babel Echo',
   'AI 会议记录工作台': 'AI meeting workspace', '未命名会议': 'Untitled meeting',
   '待机': 'Ready', '录音中': 'Recording', '已暂停': 'Paused', '处理中': 'Processing', '已结束': 'Finished',
@@ -76,6 +80,10 @@ const en = {
 };
 
 const ja = {
+  "字幕 SRT": "SRT 字幕",
+  "导出": "エクスポート", "打开或录制一场会议后可以导出。": "会議を開くか録音するとエクスポートできます。", "结束录音": "録音を終了", "更多选项": "その他のオプション", "结束后自动生成纪要": "終了後に議事録を自動作成", "去设置": "設定を開く", "正在生成纪要…": "議事録を作成中…", "正在生成课程笔记…": "授業ノートを作成中…", "查看纪要": "議事録を見る", "查看课程笔记": "授業ノートを見る", "生成课程笔记": "授業ノートを作成", "录音已结束": "録音が終了しました", "关闭": "閉じる", "正在生成…": "作成中…", "点击更改说话人": "クリックして話者を変更", "新说话人名字": "新しい話者名", "重命名": "名前を変更", "已有同名说话人，两者会合并。继续吗？": "同じ名前の話者がいるため、統合されます。続けますか？", "更改说话人": "話者を変更", "这句话的说话人": "この文の話者", "设为新说话人": "新しい話者にする", "重命名「": "名前を変更「", "」（共 ": "」（", " 句）": " 文）", "全部改名": "すべて変更", "句": "文", "合并到": "統合先", "合并到…": "統合先…",
+  "、": "、", "快速设置": "かんたん設定", "高级设置": "詳細設定", "外观": "外観", "文本任务": "テキスト処理", "不可用：": "利用不可：", "未配置": "未設定", "未启用": "無効", "已就绪": "準備完了", "已启用": "有効にしました", "已停用": "無効にしました", "测试连接": "接続テスト", "停用": "無効にする", "用于：": "用途：", "确认": "確定", "不可用": "利用不可", "日本語": "日本語", "保存中…": "保存中…", "已自动保存": "自動保存しました", "文本模型与任务": "テキストモデルとタスク", "1. 语音识别": "1. 音声認識", "至少配置一个": "1 つ以上設定", "粘贴 API Key 后自动启用，并按语言自动选择引擎。": "API キーを貼り付けると有効になり、言語ごとのエンジンは自動で選ばれます。", "2. 文本模型": "2. テキストモデル", "摘要 · 纪要 · 翻译 · 问答": "要約・議事録・翻訳・質問", "3. 说话人区分（可选）": "3. 話者の区別（任意）", "需要自定义接口、调整识别节奏或给每个任务单独选模型？": "カスタム接続先、認識タイミング、タスクごとのモデルを設定しますか？", "打开高级设置": "詳細設定を開く", "粘贴 API Key": "API キーを貼り付け", "保存并启用": "保存して有効化", "已保存并启用": "保存して有効にしました", "连接成功": "接続できました", "个模型": "個のモデル", "部分服务不提供模型列表，失败不一定代表密钥无效。": "モデル一覧を提供しないサービスもあるため、失敗してもキーが無効とは限りません。", "更换密钥": "キーを変更", "所有任务改用此服务": "すべてのタスクで使う", "整段录音会再发送给 Deepgram 一次，按时长计费；可在转写区撤销。": "録音全体をもう一度 Deepgram に送り、長さに応じて課金されます。文字起こし欄で取り消せます。", "先在上方配置 Deepgram 密钥（无需设为主要识别引擎）。": "先に上で Deepgram のキーを設定してください（メインのエンジンにする必要はありません）。", "设置项会自动保存；连接设置和密钥需要点击保存。": "設定は自動で保存されます。接続設定とキーは保存ボタンで保存します。", "适合中文和英文会议": "中国語・英語の会議向け", "适合日语和多语言，价格最低": "日本語や多言語向け、最も安価", "能区分说话人，也用于整场说话人校正": "話者を区別でき、話者の全体補正にも使います", "免费离线，需要先在本机启动 whisper.cpp 服务": "無料・オフライン。先にこの PC で whisper.cpp サーバーを起動してください", "推荐：摘要、纪要、翻译和问答": "おすすめ：要約・議事録・翻訳・質問", "与小米语音识别共用同一个密钥": "Xiaomi の音声認識と同じキーを使います", "免费离线，需要先启动 Ollama 或 LM Studio": "無料・オフライン。先に Ollama か LM Studio を起動してください", "还需要配置语音识别": "音声認識の設定が必要です", "可以转写；摘要、纪要和翻译还需要文本模型": "文字起こしは使えます。要約・議事録・翻訳にはテキストモデルが必要です", "一切就绪，可以开始录音": "準備完了。録音を始められます",
+  "整场校正说话人": "話者を全体で補正", "撤销校正": "補正を取り消す", "把整段录音交给 Deepgram 重新区分说话人（额外计费一次）": "録音全体を Deepgram に送り、話者を分け直します（追加で 1 回課金）", "恢复校正前的说话人标注": "補正前の話者ラベルに戻します", "恢复校正前的说话人标注？": "補正前の話者ラベルに戻しますか？", "正在用整段录音校正说话人…": "録音全体から話者を補正しています…", "说话人已校正": "話者を補正しました", "位说话人": "人の話者", "段有变化": "件を変更", "将把整段录音发送给 Deepgram 重新区分说话人，按音频时长计费一次": "録音全体を Deepgram に送って話者を分け直します。音声の長さに応じて 1 回課金されます", "转写文字和翻译不变，可以撤销。继续吗？": "文字起こしと翻訳は変わらず、取り消せます。続けますか？", "说话人校正": "話者の補正", "可用": "利用可能", "需要 Deepgram 密钥": "Deepgram のキーが必要", "录音或导入结束后自动用整段录音校正说话人": "録音・読み込みの終了後に録音全体で話者を自動補正", "逐句识别时，每次请求都会重新给说话人编号，所以大多数句子会被标成说话人1。校正会把整段录音再发送给 Deepgram 一次（按时长计费），按时间重新分配说话人；文字和翻译不变，可撤销。也可以在转写区手动点击「整场校正说话人」。": "文ごとの認識ではリクエストごとに話者番号が振り直されるため、ほとんどの文が話者1になります。補正では録音全体を Deepgram にもう一度送り（長さに応じて課金）、時間に沿って話者を割り当て直します。文字と翻訳は変わらず、取り消せます。文字起こし欄の「話者を全体で補正」からも実行できます。",
   '巴别回声': 'バベルエコー',
   'AI 会议记录工作台': 'AI 会議記録ワークスペース', '未命名会议': '無題の会議',
   '待机': '待機中', '录音中': '録音中', '已暂停': '一時停止', '处理中': '処理中', '已结束': '終了',
@@ -150,6 +158,19 @@ const ja = {
 
 // Model selection and cost controls share the same labels across task cards.
 for (const [zh, english, japanese] of [
+  ['使用场景', 'Context', '利用場面'], ['会议', 'Meeting', '会議'], ['上课', 'Class', '授業'],
+  ['纪要详细度', 'Note detail', 'ノートの詳しさ'], ['详细', 'Detailed', '詳細'], ['标准', 'Standard', '標準'],
+  ['Markdown 包含转写全文', 'Include transcript in Markdown', 'Markdown に全文書き起こしを含める'],
+  ['课程笔记', 'Class notes', '授業ノート'], ['课堂摘要', 'Class summary', '授業の要約'],
+  ['核心概念与公式', 'Key concepts and formulas', '重要な概念と数式'], ['例题与案例', 'Worked examples', '例題と事例'],
+  ['复习问答', 'Review questions and answers', '復習の問答'], ['内容详解', 'Topic details', '内容の詳細'],
+  ['场景已切换，请重新总结', 'Context changed; regenerate the summary', '場面を変更しました。要約を再生成してください'],
+  ['选项已改变，请重新生成纪要', 'Options changed; regenerate notes', '設定を変更しました。ノートを再生成してください'],
+  ['连接断开，请重连后再切换', 'Reconnect before changing options', '再接続してから設定を変更してください'],
+  ['已切换整理选项；已有内容保留，请手动重新生成摘要或纪要。', 'Options changed. Existing text is kept; regenerate the summary or notes when ready.', '整理設定を変更しました。既存の内容は保持されます。要約やノートを手動で再生成してください。'],
+]) { en[zh] = english; ja[zh] = japanese; }
+
+for (const [zh, english, japanese] of [
   ['自动摘要间隔（秒，0 为关闭）', 'Auto summary interval (seconds, 0 = off)', '自動要約の間隔（秒、0 で無効）'],
   ['自动摘要最少新增字数', 'Minimum new characters for auto summary', '自動要約に必要な追加文字数'],
   ['摘要目标字数', 'Target summary length (characters)', '要約の目標文字数'],
@@ -177,6 +198,53 @@ for (const [zh, english, japanese] of [
   ['未返回完整用量的请求', 'Requests with incomplete usage data', '使用量が未報告のリクエスト'],
   ['用量说明', 'Usage note', '使用量について'],
   ['旧会议用量不完整，仅新增请求按任务统计。', 'Legacy usage is incomplete. Only new requests have per-task counts.', '旧バージョンの使用量は不完全です。新規リクエストのみタスク別に集計します。'],
+]) { en[zh] = english; ja[zh] = japanese; }
+
+for (const [zh, english, japanese] of [
+  ['界面主题', 'Interface theme', 'UI テーマ'],
+  ['默认主题', 'Default theme', '既定のテーマ'],
+  ['Endspace 风格', 'Endspace style', 'Endspace スタイル'],
+  ['半透明面板与柔和渐变', 'Translucent panels and soft gradients', '半透明パネルと柔らかなグラデーション'],
+  ['纸本', 'Paper', 'ペーパー'],
+  ['暖色纸张、衬线正文，适合长时间阅读纪要', 'Warm paper and serif text for reading long notes', '温かみのある紙面と明朝体。長い議事録を読みやすく'],
+  ['雾凇', 'Frost', 'フロスト'],
+  ['冷灰青色、留白宽松，安静不抢眼', 'Cool grey-teal with generous space; calm and quiet', '青みがかったグレーとゆとりある余白で、落ち着いた画面'],
+  ['高对比', 'High contrast', 'ハイコントラスト'],
+  ['纯黑白、粗边框与醒目焦点，便于弱视和强光下使用', 'Pure black and white, thick borders and a strong focus ring for low vision and bright light', '白黒・太い枠線・はっきりしたフォーカス表示。弱視や強い光の下でも見やすく'],
+  ['黑白灰、信号黄与工业排版', 'Monochrome, signal yellow and industrial type', 'モノクロ、シグナルイエロー、工業的な組版'],
+  ['明暗模式', 'Color mode', 'カラーモード'],
+  ['界面间距', 'Spacing', '表示間隔'],
+  ['舒适', 'Comfortable', 'ゆったり'],
+  ['紧凑', 'Compact', 'コンパクト'],
+  ['阅读字号', 'Reading font size', '本文の文字サイズ'],
+  ['面板圆角', 'Panel corner radius', 'パネルの角丸'],
+  ['强调色', 'Accent color', 'アクセントカラー'],
+  ['使用主题配色', 'Use theme colors', 'テーマの配色を使用'],
+  ['显示背景纹理', 'Show background texture', '背景の模様を表示'],
+  ['恢复当前主题默认值', 'Reset this theme', '現在のテーマをリセット'],
+  ['即时预览，自动保存在本机。', 'Live preview. Saved automatically on this device.', '即時プレビュー。この端末に自動保存します。'],
+  ['当前外观已应用，但无法保存；重启后可能恢复。', 'Appearance applied, but could not be saved. It may reset after restarting.', '外観は適用されましたが保存できません。再起動後に元に戻る可能性があります。'],
+  ['每种主题分别记住自定义外观。阅读字号调整转写、摘要、纪要和问答。', 'Each theme remembers its own customization. Reading size affects transcripts, summaries, minutes and answers.', 'テーマごとに外観を保存します。文字サイズは文字起こし、要約、議事録、回答に適用されます。'],
+  ['设计参考：Endspace（cloud-oc）', 'Design reference: Endspace (cloud-oc)', 'デザイン参考：Endspace（cloud-oc）'],
+]) { en[zh] = english; ja[zh] = japanese; }
+
+for (const [zh, english, japanese] of [
+  ['阅读器', 'Reader', 'リーダー'], ['阅读／打印', 'Read / print', '閲覧／印刷'],
+  ['Markdown 阅读器', 'Markdown reader', 'Markdown リーダー'], ['打开 MD', 'Open MD', 'MD を開く'],
+  ['查看源码', 'View source', 'ソースを表示'], ['返回阅读', 'Reading view', '閲覧に戻る'],
+  ['保存 PDF', 'Save PDF', 'PDF を保存'], ['打印', 'Print', '印刷'], ['文档目录', 'Contents', '目次'],
+  ['本地阅读，不自动加载网络图片。', 'Read locally. Remote images are not loaded automatically.', 'ローカルで閲覧します。外部画像は自動取得しません。'],
+  ['给文字一个清晰的版面', 'A clearer page for your words', '文章を読みやすいページに'],
+  ['打开本地 Markdown，或从会议摘要进入阅读器。支持表格、图表、公式和打印。', 'Open a local Markdown file or a meeting summary. Tables, diagrams, math and printing are supported.', 'ローカルの Markdown や会議の要約を開けます。表、図、数式、印刷に対応。'],
+  ['查看排版示例', 'View example', '表示例を見る'], ['排版示例', 'Formatting example', '表示サンプル'],
+  ['未命名文档', 'Untitled document', '無題の文書'], ['字符', 'characters', '文字'],
+  ['正在排版…', 'Rendering…', '組版中…'], ['排版完成 · 本地阅读', 'Ready · Local reading', '表示完了 · ローカル閲覧'],
+  ['排版完成，部分内容显示为源码。', 'Ready; some content is shown as source.', '表示完了。一部はソースで表示しています。'],
+  ['无法排版：', 'Could not render: ', '表示できません：'], ['准备就绪', 'Ready', '準備完了'],
+  ['已取消', 'Canceled', 'キャンセルしました'], ['PDF 已保存', 'PDF saved', 'PDF を保存しました'],
+  ['已提交打印', 'Sent to printer', '印刷を送信しました'], ['完整纪要', 'Complete meeting notes', '会議記録全体'],
+  ['请先选择会议', 'Select a meeting first', '会議を選択してください'], ['无法读取会议', 'Could not read meeting', '会議を読み込めません'],
+  ['Markdown 文件不能超过 2 MB', 'Markdown files must be under 2 MB', 'Markdown ファイルは 2 MB 以下にしてください'],
 ]) { en[zh] = english; ja[zh] = japanese; }
 
 export function translate(key, language = 'zh') {

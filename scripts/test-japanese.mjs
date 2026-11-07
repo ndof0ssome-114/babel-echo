@@ -18,6 +18,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { useServerToken } from './server-auth.mjs';
 import { execFile } from 'node:child_process';
 import { loadCreds } from '../lib/env.mjs';
 import { loadConfig } from '../lib/config.mjs';
@@ -29,6 +30,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, '..', '.probe', 'ja-fixture');
 const FIXTURE = join(OUT, 'ja-meeting-sapi.wav');
 const BASE = process.argv[2] || 'http://127.0.0.1:8777';
+// The server must be started with the same MIAOJI_ACCESS_TOKEN as this script.
 
 const EXPECTED = ['会議', '発表', '予算', '計画書', '田中', '金曜日'];
 // Hallucination signatures. NOTE: these appeared when the fixture was made by
@@ -132,6 +134,7 @@ async function main() {
   // ---- full product flow -------------------------------------------------
   console.log('');
   console.log('=== full flow through the server ===');
+  useServerToken(BASE);
 
   const boot = await (await fetch(BASE + '/api/bootstrap')).json();
   const jaRoute = boot.status.active !== 'auto' ? boot.status.active : boot.status.routes.ja;

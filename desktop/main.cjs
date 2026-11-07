@@ -13,11 +13,13 @@
 
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, dialog,
         Notification, powerSaveBlocker, nativeImage, shell, desktopCapturer,
-        systemPreferences } = require('electron');
-const { spawn } = require('node:child_process');
+        systemPreferences, session } = require('electron');
+const { spawn, execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const installMarkdownReader = require('./markdown-reader.cjs');
+const { isExternalLink, markdownPathsFromArgv, macDefaultHandlerScript } = require('./markdown-files.cjs');
 
 // A GUI app can outlive the shell that launched it. A closed stdout/stderr
 // pipe must not become an uncaught EPIPE and show a main-process error dialog.
@@ -35,6 +37,11 @@ const IS_DEV = process.argv.includes('--dev');
 // page render / server handshake all work, prints results and exits. It is
 // the only way to verify an Electron app without a human watching a window.
 const SELFTEST = process.argv.includes('--selftest');
+const REAL_MICROPHONE_TEST = process.argv.includes('--selftest-real-microphone');
+const REAL_SYSTEM_AUDIO_TEST = process.argv.includes('--selftest-real-system-audio');
+const READER_ONLY = process.argv.includes('--reader');
+// Must match build.appId in package.json; macOS default-app registration uses it.
+const MAC_BUNDLE_ID = 'com.miaoji.desktop';
 // --capture=<file.png> renders the window, saves a PNG and exits; combined
 // with --open=<query> it can capture any deep-linked state.
 const argValue = (name) => {
@@ -66,12 +73,26 @@ const MEDIA_EXT = ['wav', 'mp3', 'm4a', 'mp4', 'mov', 'webm', 'ogg', 'oga', 'fla
   'aac', 'wma', 'mkv', 'avi', 'opus', 'amr', 'aif', 'aiff', '3gp', 'm4v'];
 
 let win = null;
+let markdownReader = null;
+let recorderShellStarted = false;
 let tray = null;
 let server = null;
 let serverUrl = null;
+let accessToken = null;
 let quitting = false;
 let sleepBlockerId = null;
 let live = { recording: false, processing: false };
+// Markdown files the OS asked us to open before the reader was ready: double-click on
+// Windows passes the path as an argument, macOS sends open-file events during launch.
+const pendingMarkdown = markdownPathsFromArgv(process.argv);
+// Opening a .md file starts only the reader (no recorder window, tray or shortcuts),
+// exactly like --reader. Decided once the launch-time open-file events have arrived.
+let readerOnly = READER_ONLY;
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (markdownReader && serverUrl) openMarkdownPath(filePath);
+  else pendingMarkdown.push(filePath);
+});
 // Accelerators actually claimed; another app may already own a candidate.
 const shortcuts = { toggle: null, show: null };
 const alreadyNotified = new Set();
@@ -92,7 +113,7 @@ function startServer() {
         MIAOJI_PARENT_WATCHDOG: '1',
         MIAOJI_DATA_DIR: DATA_DIR,
         MIAOJI_CONFIG_PATH: path.join(DATA_DIR, 'config.json'),
-        ...((SELFTEST || CAPTURE) ? { DSH_HOME: path.join(DATA_DIR, 'qa-credentials') } : {}),
+        ...((SELFTEST || CAPTURE) ? { MIAOJI_ALLOW_ENV_CREDENTIALS: '0' } : {}),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -191,8 +212,15 @@ function createWindow() {
   // getUserMedia fails, which would make the recorder silently useless.
   const ses = win.webContents.session;
   const allowed = new Set(['media', 'notifications', 'clipboard-read', 'clipboard-sanitized-write']);
-  ses.setPermissionRequestHandler((wc, permission, callback) => callback(allowed.has(permission)));
-  ses.setPermissionCheckHandler((wc, permission) => allowed.has(permission));
+  // Only the bundled local server's pages get these, never a page the
+  // window might have been navigated to.
+  const fromApp = (url) => {
+    try { return !!serverUrl && new URL(url).origin === new URL(serverUrl).origin; } catch { return false; }
+  };
+  ses.setPermissionRequestHandler((wc, permission, callback, details) =>
+    callback(allowed.has(permission) && fromApp(details?.requestingUrl || wc?.getURL())));
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin) =>
+    allowed.has(permission) && fromApp(requestingOrigin || wc?.getURL()));
   // Capture the primary display's playback audio. The video track is required
   // by getDisplayMedia, but the renderer stops it immediately and only mixes
   // the loopback audio. macOS 13+ exposes this through ScreenCaptureKit/Core
@@ -204,7 +232,7 @@ function createWindow() {
           callback({});
           return;
         }
-        const sources = await desktopCapturer.getSources({ types: ['screen'] });
+        const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
         callback(sources.length ? { video: sources[0], audio: 'loopback' } : {});
       } catch (err) {
         console.error('[display capture]', err);
@@ -227,9 +255,37 @@ function createWindow() {
     }
   });
 
+  // The recorder window must stay on the local app: a page elsewhere would
+  // inherit the preload bridge. External links open in the system browser.
+  win.webContents.on('will-navigate', (event, url) => {
+    let sameApp = false;
+    try { sameApp = new URL(url).origin === new URL(serverUrl).origin; } catch { /* invalid URL */ }
+    if (sameApp) return;
+    event.preventDefault();
+    if (isExternalLink(url)) shell.openExternal(url);
+  });
+
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isExternalLink(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  win.webContents.on('context-menu', (_event, params) => {
+    const edit = params.editFlags;
+    const items = params.isEditable ? [
+      { role: 'undo', label: '撤销', enabled: edit.canUndo },
+      { role: 'redo', label: '重做', enabled: edit.canRedo },
+      { type: 'separator' },
+      { role: 'cut', label: '剪切', enabled: edit.canCut },
+      { role: 'copy', label: '复制', enabled: edit.canCopy },
+      { role: 'paste', label: '粘贴', enabled: edit.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', label: '全选' },
+    ] : params.selectionText ? [
+      { role: 'copy', label: '复制', enabled: edit.canCopy },
+      { role: 'selectAll', label: '全选' },
+    ] : [];
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
   });
 
   win.loadURL(serverUrl + (OPEN_QUERY ? '?' + OPEN_QUERY + (SELFTEST ? '&selftest=1' : '') : SELFTEST ? '?selftest=1' : ''));
@@ -237,15 +293,42 @@ function createWindow() {
 }
 
 function showWindow() {
-  if (!win) return;
+  if (!serverUrl) return;
+  if (!win || win.isDestroyed()) createWindow();
+  startRecorderShell();
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
 }
 
+function activateWindow() {
+  if (!serverUrl || !markdownReader) return;
+  if (readerOnly && !recorderShellStarted) {
+    const reader = [...markdownReader.readers.values()].map((entry) => entry.window)
+      .find((window) => !window.isDestroyed()) || markdownReader.open();
+    if (reader.isMinimized()) reader.restore();
+    reader.show();
+    reader.focus();
+    return;
+  }
+  showWindow();
+}
+
 function sendToRenderer(channel) {
   showWindow();
-  if (win && !win.isDestroyed()) win.webContents.send(channel);
+  if (win && !win.isDestroyed()) {
+    const target = win.webContents;
+    if (target.isLoading()) target.once('did-finish-load', () => { if (!target.isDestroyed()) target.send(channel); });
+    else target.send(channel);
+  }
+}
+
+function startRecorderShell() {
+  if (recorderShellStarted) return;
+  recorderShellStarted = true;
+  createTray(); registerShortcuts();
+  console.log('[miaoji] 快捷键: 录音=' + (shortcuts.toggle || '未注册') + ' 显示窗口=' + (shortcuts.show || '未注册'));
+  setInterval(pollLive, 2500); pollLive();
 }
 
 // ---------------------------------------------------------------------------
@@ -300,10 +383,16 @@ function notify(title, body) {
 // live state polling: drives tray, sleep blocker and notifications
 // ---------------------------------------------------------------------------
 
+// The main process talks to the server with Node's fetch, which does not use
+// the window session's cookie, so it sends the access token as a header.
+function serverFetch(url, init = {}) {
+  return fetch(url, { ...init, headers: { ...init.headers, authorization: 'Bearer ' + accessToken } });
+}
+
 async function pollLive() {
   if (!serverUrl) return;
   try {
-    const res = await fetch(serverUrl + 'api/live', { signal: AbortSignal.timeout(4000) });
+    const res = await serverFetch(serverUrl + 'api/live', { signal: AbortSignal.timeout(4000) });
     const next = await res.json();
 
     if (!!next.recording !== !!live.recording) {
@@ -342,6 +431,56 @@ async function pollLive() {
 // menus + ipc
 // ---------------------------------------------------------------------------
 
+/** Open a Markdown file the OS handed us (double-click, Open With, drag onto the Dock icon). */
+async function openMarkdownPath(filePath) {
+  try {
+    const reader = markdownReader.open(await markdownReader.readMarkdownFile(filePath));
+    if (reader.isMinimized()) reader.restore();
+    reader.show();
+    reader.focus();
+  } catch (error) {
+    dialog.showErrorBox('无法打开 Markdown', path.basename(String(filePath)) + '\n' + error.message);
+  }
+}
+
+/**
+ * Make this app the default for .md files. Both systems keep that choice with the user:
+ * macOS asks for confirmation (or we explain Finder's "Change All"), and Windows only lets
+ * apps open the Default apps page, where the installer has registered us.
+ */
+async function setDefaultMarkdownReader() {
+  const owner = BrowserWindow.getFocusedWindow() || undefined;
+  if (!app.isPackaged) {
+    await dialog.showMessageBox(owner, { type: 'info', message: '开发模式下无法设为默认',
+      detail: '只有安装版会登记 .md 文件类型。请用打包好的安装包安装后再设置。' });
+    return;
+  }
+  if (process.platform === 'darwin') {
+    const manual = '也可以手动设置：在访达中选中任意 .md 文件 → 显示简介（⌘I）→「打开方式」选择巴别回声 →「全部更改…」。';
+    const status = await new Promise((resolve) => execFile('/usr/bin/osascript',
+      ['-l', 'JavaScript', '-e', macDefaultHandlerScript(MAC_BUNDLE_ID)], { timeout: 60000 },
+      (error, stdout) => resolve(error ? NaN : Number(String(stdout).trim()))));
+    await dialog.showMessageBox(owner, status === 0
+      ? { type: 'info', message: '已将巴别回声设为 Markdown 文件的默认阅读器', detail: '如果系统弹出确认框，请选择使用巴别回声。\n' + manual }
+      : { type: 'warning', message: '没能自动设置默认阅读器', detail: manual });
+    return;
+  }
+  if (process.platform === 'win32') {
+    // Registered under RegisteredApplications by the installer (build/installer.nsh).
+    const machine = await new Promise((resolve) => execFile('reg',
+      ['query', 'HKLM\\Software\\RegisteredApplications', '/v', 'BabelEcho'], (error) => resolve(!error)));
+    const choice = await dialog.showMessageBox(owner, { type: 'info', buttons: ['打开“默认应用”设置', '取消'], defaultId: 0, cancelId: 1,
+      message: '在 Windows 设置中把 .md 文件交给巴别回声',
+      detail: 'Windows 不允许应用自行修改默认程序。接下来会打开“默认应用”中巴别回声的页面：点击 .md（以及 .markdown），选择“巴别回声”。\n\n也可以右键任意 .md 文件 →「打开方式」→「选择其他应用」→ 选巴别回声并勾选“始终使用此应用”。便携版不会登记文件类型，请使用安装版。' });
+    if (choice.response === 0) {
+      await shell.openExternal('ms-settings:defaultapps?' + (machine ? 'registeredAppMachine' : 'registeredAppUser') + '=BabelEcho')
+        .catch(() => shell.openExternal('ms-settings:defaultapps'));
+    }
+    return;
+  }
+  await dialog.showMessageBox(owner, { type: 'info', message: '请在系统的“默认应用程序”设置中为 .md 文件选择巴别回声' });
+}
+
 function buildMenu() {
   const template = [];
   if (process.platform === 'darwin') {
@@ -365,8 +504,25 @@ function buildMenu() {
       label: '文件',
       submenu: [
         { label: '导入音视频…', accelerator: 'CommandOrControl+O', click: () => sendToRenderer('miaoji:import') },
+        { label: 'Markdown 阅读器', click: () => markdownReader?.open() },
+        { label: '打开 Markdown 文件…', accelerator: 'CommandOrControl+Shift+O', click: () => markdownReader?.openFile().catch((error) => dialog.showErrorBox('无法打开 Markdown', error.message)) },
+        { label: '打印当前文档…', accelerator: 'CommandOrControl+P', click: () => markdownReader?.printFocused() },
+        { label: '设为默认 Markdown 阅读器…', click: () => setDefaultMarkdownReader() },
         { type: 'separator' },
         { role: 'quit', label: '退出' },
+      ],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'pasteAndMatchStyle', label: '粘贴并匹配样式' },
+        { role: 'selectAll', label: '全选' },
       ],
     },
     {
@@ -401,7 +557,7 @@ function buildMenu() {
     {
       label: '帮助',
       submenu: [
-        { label: '在浏览器中打开', click: () => shell.openExternal(serverUrl) },
+        { label: '在浏览器中打开', click: () => shell.openExternal(serverUrl + '?token=' + accessToken) },
         { label: '打开数据文件夹', click: () => shell.openPath(DATA_DIR) },
         { label: '打开应用文件夹', click: () => shell.openPath(ROOT) },
       ],
@@ -442,6 +598,24 @@ function registerShortcuts() {
 }
 
 function registerIpc() {
+  // The server uses a new port on each launch; renderer localStorage is only
+  // an origin-scoped cache. Keep appearance in the stable application profile.
+  const appearancePath = path.join(app.getPath('userData'), 'appearance.json');
+  const appearanceSchema = import(require('node:url').pathToFileURL(path.join(ROOT, 'public', 'appearance.js')).href);
+  ipcMain.handle('miaoji:appearance-get', async () => {
+    const { normalizeAppearance } = await appearanceSchema;
+    try { return normalizeAppearance(JSON.parse(fs.readFileSync(appearancePath, 'utf8'))); }
+    catch { return null; }
+  });
+  ipcMain.handle('miaoji:appearance-set', async (_event, preference) => {
+    const { normalizeAppearance } = await appearanceSchema;
+    const saved = normalizeAppearance(preference);
+    fs.mkdirSync(path.dirname(appearancePath), { recursive: true });
+    const temp = appearancePath + '.tmp';
+    fs.writeFileSync(temp, JSON.stringify(saved), 'utf8');
+    fs.renameSync(temp, appearancePath);
+    return saved;
+  });
   ipcMain.handle('miaoji:open-file', async () => {
     const result = await dialog.showOpenDialog(win, {
       title: '选择要转写的音视频文件',
@@ -557,13 +731,22 @@ async function runCapture() {
  */
 async function testSettingsDrawer(check, evalJs) {
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-  const cfg = async () => (await (await fetch(serverUrl + 'api/config')).json());
+  const cfg = async () => (await (await serverFetch(serverUrl + 'api/config')).json());
   const drawerHidden = () => evalJs('document.getElementById("drawer").hidden');
 
   const before = await cfg();
 
   await evalJs('document.getElementById("btnSettings").click()');
   await pause(1400);
+  await evalJs('document.querySelector("[data-tab=quick]").click()');
+  await pause(900);
+  const quick = await evalJs('(() => ({ cards: document.querySelectorAll(".quick-card[data-provider]").length,' +
+    'overview: !!document.querySelector(".quick-overview"),' +
+    'selected: document.querySelector("[data-tab=quick]").getAttribute("aria-selected") }))()');
+  check('quick settings lists every provider with a status overview',
+    quick.overview && quick.selected === 'true' && quick.cards >= 7, quick.cards + ' cards, overview=' + quick.overview + ' selected=' + quick.selected);
+  await evalJs('document.querySelector("[data-tab=advanced]").click()');
+  await pause(900);
 
   const opened = await evalJs('(() => {' +
     'const d = document.getElementById("drawer");' +
@@ -595,12 +778,12 @@ async function testSettingsDrawer(check, evalJs) {
 
   await evalJs('(() => {' +
     'const section=[...document.querySelectorAll(".settings-section")].find(e=>e.querySelector("h4")?.textContent==="实时识别节奏");' +
-    'section.querySelector("input[type=number]").value="5.0";' +
-    'section.querySelector("button").click();' +
+    'const input=section.querySelector("input[type=number]"); input.value="5.0";' +
+    'input.dispatchEvent(new Event("change", { bubbles: true }));' +
     '})()');
   await pause(1000);
-  check('preview interval saves from settings', (await cfg()).realtime.stepMs === 5000);
-  await fetch(serverUrl + 'api/config', { method: 'POST', headers: { 'content-type': 'application/json' },
+  check('preview interval saves automatically from settings', (await cfg()).realtime.stepMs === 5000);
+  await serverFetch(serverUrl + 'api/config', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ realtime: before.realtime }) });
 
   // toggle the first provider switch and confirm the server persisted it
@@ -620,7 +803,7 @@ async function testSettingsDrawer(check, evalJs) {
   check('drawer stays open after a toggle', afterToggle.hidden === false);
 
   // restore the config we just changed
-  await fetch(serverUrl + 'api/config', {
+  await serverFetch(serverUrl + 'api/config', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ asr: { providers: before.asr.providers } }),
@@ -655,17 +838,19 @@ async function testSettingsDrawer(check, evalJs) {
 
 async function testModelSettings(check, evalJs) {
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const before = await (await fetch(serverUrl + 'api/config')).json();
+  const before = await (await serverFetch(serverUrl + 'api/config')).json();
   await evalJs('document.getElementById("btnSettings").click()');
   await pause(500);
+  await evalJs('document.querySelector("[data-tab=advanced]").click()');
+  await pause(700);
   const choose = async (field, value) => evalJs(`(() => {
     const e = document.querySelector('[data-task="summary"] [data-field="${field}"]');
     e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('change', {bubbles:true}));
   })()`);
+  // Task models save on change; wait for the last autosave to land.
   const save = async () => {
-    await evalJs('document.querySelector(\'[data-task="summary"] [data-action="save-task"]\').click()');
-    await pause(600);
-    return (await (await fetch(serverUrl + 'api/config')).json()).llm.roles.summary;
+    await pause(700);
+    return (await (await serverFetch(serverUrl + 'api/config')).json()).llm.roles.summary;
   };
   try {
     await choose('model-select', 'deepseek-v4-pro');
@@ -702,10 +887,10 @@ async function testModelSettings(check, evalJs) {
       const s = document.querySelector('[data-settings="summary"]');
       s.querySelector('[data-field="autoMs"]').value = '240';
       s.querySelector('[data-field="minNewChars"]').value = '300';
-      s.querySelector('button').click();
+      s.querySelector('[data-field="minNewChars"]').dispatchEvent(new Event('change', {bubbles:true}));
     })()`);
     await pause(500);
-    const summary = (await (await fetch(serverUrl + 'api/config')).json()).summary;
+    const summary = (await (await serverFetch(serverUrl + 'api/config')).json()).summary;
     check('summary interval and new text threshold persist', summary.autoMs === 240000 && summary.minNewChars === 300);
     await evalJs(`(() => {
       const drawer = document.getElementById('drawerBody');
@@ -719,7 +904,7 @@ async function testModelSettings(check, evalJs) {
     }
   } finally {
     await evalJs('if (window.qaOriginalFetch) { window.fetch = window.qaOriginalFetch; delete window.qaOriginalFetch; }');
-    await fetch(serverUrl + 'api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ llm: before.llm, summary: before.summary }) });
+    await serverFetch(serverUrl + 'api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ llm: before.llm, summary: before.summary }) });
     await evalJs('document.getElementById("drawerClose").click()');
   }
 }
@@ -728,6 +913,8 @@ async function testCustomSettings(check, evalJs) {
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   await evalJs('document.getElementById("btnSettings").click()');
   await pause(500);
+  await evalJs('document.querySelector("[data-tab=advanced]").click()');
+  await pause(700);
   await evalJs('(() => {' +
     'const form=document.querySelector(".add-provider"); form.open=true;' +
     'const inputs=form.querySelectorAll(".settings-field input");' +
@@ -735,10 +922,10 @@ async function testCustomSettings(check, evalJs) {
     'form.querySelector("button.btn.primary").click();' +
     '})()');
   await pause(900);
-  const created = await (await fetch(serverUrl + 'api/config')).json();
+  const created = await (await serverFetch(serverUrl + 'api/config')).json();
   const found = Object.entries(created.asr.providers).find(([, value]) => value.label === 'QA local ASR');
   check('custom speech provider can be added from settings', !!found, found?.[0] || 'missing');
-  if (found) await fetch(serverUrl + 'api/providers/asr/' + found[0], { method: 'DELETE' });
+  if (found) await serverFetch(serverUrl + 'api/providers/asr/' + found[0], { method: 'DELETE' });
   await evalJs('document.getElementById("drawerClose").click()');
 
   const locales = await evalJs('(() => {' +
@@ -753,6 +940,39 @@ async function testCustomSettings(check, evalJs) {
     JSON.stringify(locales));
 }
 
+async function testAppearanceSettings(check, evalJs) {
+  const result = await evalJs('(async () => {' +
+    'const a = await import("/appearance.js");' +
+    'await a.updateAppearance({skin:"endspace", mode:"dark"}, {accent:"#008577", fontSize:18});' +
+    'const pref = await window.miaojiDesktop.getAppearancePreference();' +
+    'return {pref, skin:document.documentElement.dataset.skin, mode:document.documentElement.dataset.theme};' +
+    '})()');
+  check('appearance IPC saves the selected theme and design tokens',
+    result.pref.skin === 'endspace' && result.pref.profiles.endspace.fontSize === 18 &&
+    result.pref.profiles.endspace.accent === '#008577' && result.skin === 'endspace' && result.mode === 'dark');
+  const persisted = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'appearance.json'), 'utf8'));
+  check('appearance is persisted outside the renderer origin', persisted.skin === 'endspace' && persisted.mode === 'dark');
+  // Clear only disposable QA-origin preferences: a new random server port on
+  // the next launch likewise has no localStorage entries from the old origin.
+  await evalJs('localStorage.removeItem("babel-echo-appearance-v1"); localStorage.removeItem("miaoji-theme");');
+  await win.loadURL(serverUrl);
+  await waitForUi(15000);
+  const restored = await evalJs('(async () => {' +
+    'const a = await import("/appearance.js"); return a.getAppearance(); })()');
+  check('desktop appearance restores when origin storage is empty',
+    restored.skin === 'endspace' && restored.mode === 'dark' && restored.profiles.endspace.fontSize === 18);
+  const isolated = await evalJs('(async () => {' +
+    'const a = await import("/appearance.js"); await a.updateAppearance({skin:"default"});' +
+    'return a.getAppearance(); })()');
+  check('appearance profiles remain independent', isolated.profiles.default.fontSize === 14 && isolated.profiles.endspace.fontSize === 18);
+  const reset = await evalJs('(async () => {' +
+    'const a = await import("/appearance.js"); await a.updateAppearance({skin:"endspace"});' +
+    'await a.resetAppearanceProfile(); const p=a.getAppearance();' +
+    'await a.updateAppearance({skin:"default",mode:"auto"}); return p; })()');
+  check('appearance reset preserves mode and clears only active customization',
+    reset.skin === 'endspace' && reset.mode === 'dark' && reset.profiles.endspace.fontSize === 14 && reset.profiles.endspace.accent === '');
+}
+
 async function runSelfTest() {
   const results = [];
   const check = (name, ok, detail) => {
@@ -763,6 +983,11 @@ async function runSelfTest() {
 
   try {
     check('window created', !win.isDestroyed());
+    const editMenu = Menu.getApplicationMenu()?.items.find((item) => item.label === '编辑');
+    check('native edit menu exposes copy and paste',
+      ['copy', 'paste', 'selectall'].every((role) => editMenu?.submenu?.items.some((item) => item.role === role)),
+      JSON.stringify(editMenu?.submenu?.items.map((item) => ({ label: item.label, role: item.role }))));
+    check('text context menu is registered', win.webContents.listenerCount('context-menu') > 0);
     check('server handshake returned a URL', !!serverUrl, serverUrl);
     check('server process is running', !!server && server.exitCode === null);
     check('recording global shortcut registered', !!shortcuts.toggle, String(shortcuts.toggle));
@@ -770,9 +995,31 @@ async function runSelfTest() {
     check('sleep blocker is available', typeof powerSaveBlocker.start === 'function');
     check('tray created', !!tray && !tray.isDestroyed());
 
+    if (app.isPackaged && process.platform === 'darwin') {
+      const contents = path.dirname(path.dirname(process.execPath));
+      const frameworks = path.join(contents, 'Frameworks');
+      const bundles = [path.dirname(contents), ...fs.readdirSync(frameworks)
+        .filter((name) => name.includes('Helper') && name.endsWith('.app'))
+        .map((name) => path.join(frameworks, name))];
+      for (const bundle of bundles) {
+        let allowed = false;
+        let detail;
+        try {
+          const entitlements = execFileSync('/usr/bin/codesign', ['-d', '--entitlements', ':-', bundle],
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          allowed = /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/.test(entitlements);
+        } catch (error) { detail = error.message; }
+        check('signed microphone entitlement: ' + path.basename(bundle), allowed, detail);
+      }
+    }
+
     const uiUp = await waitForUi(30000);
     check('app UI rendered', uiUp);
     if (uiUp) {
+      if (!REAL_MICROPHONE_TEST) {
+        await evalJs('(' + require('./synthetic-microphone.cjs').toString() + ')()');
+        console.log('  INFO  microphone checks use synthetic streams; no physical microphone is opened');
+      }
       // give boot()'s bootstrap fetch a moment to settle
       await new Promise((r) => setTimeout(r, 2000));
 
@@ -814,16 +1061,18 @@ async function runSelfTest() {
       check('microphone test and system audio controls rendered', audioUi.test && audioUi.system);
       if (['win32', 'darwin'].includes(process.platform)) {
         check('system audio enabled by default on supported desktop', audioUi.checked === true);
-        const loopback = await Promise.race([
-          win.webContents.executeJavaScript('(async () => {' +
-            'let stream; try { stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});' +
-            'return {audio:stream.getAudioTracks().length,video:stream.getVideoTracks().length};' +
-            '} catch(e) { return {error:e.name+":"+e.message}; }' +
-            'finally { stream?.getTracks().forEach(t=>t.stop()); } })()', true),
-          new Promise((resolve) => setTimeout(() => resolve({ error: 'timed out' }), 10000)),
-        ]);
-        check('desktop loopback provides an audio track', loopback.audio > 0,
-          loopback.error || 'audio=' + loopback.audio + ' video=' + loopback.video);
+        if (REAL_SYSTEM_AUDIO_TEST) {
+          const loopback = await Promise.race([
+            win.webContents.executeJavaScript('(async () => {' +
+              'let stream; try { stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});' +
+              'return {audio:stream.getAudioTracks().length,video:stream.getVideoTracks().length};' +
+              '} catch(e) { return {error:e.name+":"+e.message}; }' +
+              'finally { stream?.getTracks().forEach(t=>t.stop()); } })()', true),
+            new Promise((resolve) => setTimeout(() => resolve({ error: 'timed out' }), 10000)),
+          ]);
+          check('desktop loopback provides an audio track', loopback.audio > 0,
+            loopback.error || 'audio=' + loopback.audio + ' video=' + loopback.video);
+        } else console.log('  SKIP  physical system audio capture (requires --selftest-real-system-audio)');
       }
 
       const micProbe = await evalJs('(async () => { const devices = await navigator.mediaDevices.enumerateDevices();' +
@@ -834,7 +1083,7 @@ async function runSelfTest() {
         '} catch (e) { return { available: true, matched: false, error: e.name }; }' +
         'finally { if (stream) stream.getTracks().forEach(t => t.stop()); } })()');
       if (micProbe.available) {
-        check('specific microphone can be opened by device ID', micProbe.matched, micProbe.error || 'device ID matched');
+        check((REAL_MICROPHONE_TEST ? 'physical' : 'synthetic') + ' microphone can be opened by device ID', micProbe.matched, micProbe.error || 'device ID matched');
       }
 
       const focusedMic = await evalJs('(async () => {' +
@@ -865,10 +1114,14 @@ async function runSelfTest() {
         'return {testing, stopped, peak};' +
         '} catch(e) { stopCapture(); await source?.close(); return {error:e.message}; }' +
         '})()');
-      check('microphone test starts and stops capture', captureProbe.testing && captureProbe.stopped,
+      check((REAL_MICROPHONE_TEST ? 'physical' : 'synthetic') + ' microphone test starts and stops capture', captureProbe.testing && captureProbe.stopped,
         captureProbe.error || 'started and stopped');
       check('microphone and system streams reach the PCM meter', captureProbe.peak >= 0.003,
         captureProbe.error || 'peak=' + captureProbe.peak);
+      if (!REAL_MICROPHONE_TEST) {
+        const fixture = await evalJs('({calls:window.miaojiSyntheticMicrophone.calls,active:window.miaojiSyntheticMicrophone.active.size})');
+        check('synthetic microphone streams are released', fixture.calls > 0 && fixture.active === 0, JSON.stringify(fixture));
+      }
 
       const nativePick = await evalJs('typeof window.miaojiDesktop.pickFile === "function" && typeof window.miaojiDesktop.setRecording === "function" && typeof window.miaojiDesktop.notify === "function"');
       check('native dialog / notify / recording IPC exposed', nativePick === true);
@@ -880,9 +1133,16 @@ async function runSelfTest() {
       await testSettingsDrawer(check, evalJs);
       await testModelSettings(check, evalJs);
       await testCustomSettings(check, evalJs);
+      await testAppearanceSettings(check, evalJs);
+      await require('./reader-selftest.cjs')({ manager: markdownReader, root: ROOT, check,
+        outputDir: process.env.MIAOJI_QA_CAPTURE_DIR, mainWindow: win, dataDir: DATA_DIR, serverUrl });
     }
   } catch (err) {
     check('selftest completed without throwing', false, String((err && err.message) || err));
+  } finally {
+    if (!REAL_MICROPHONE_TEST && !win.isDestroyed()) {
+      await evalJs('window.miaojiSyntheticMicrophone?.cleanup()').catch(() => {});
+    }
   }
 
   const failed = results.filter((x) => !x).length;
@@ -908,6 +1168,11 @@ async function main() {
   try {
     const info = await startServer();
     serverUrl = info.url.endsWith('/') ? info.url : info.url + '/';
+    accessToken = info.accessToken;
+    // Every window (recorder and Markdown readers) uses the default session,
+    // so one cookie authorises their page, API and WebSocket requests.
+    await session.defaultSession.cookies.set({ url: serverUrl, name: info.accessCookie, value: accessToken,
+      httpOnly: true, sameSite: 'strict' });
   } catch (err) {
     dialog.showErrorBox('巴别回声启动失败', String((err && err.message) || err));
     quitting = true;
@@ -915,14 +1180,28 @@ async function main() {
     return;
   }
 
+  markdownReader = installMarkdownReader({ BrowserWindow, ipcMain, dialog, shell, Menu,
+    getServerUrl: () => serverUrl, getMainWindow: () => win, selftest: SELFTEST });
+  // Launched by opening a .md file: behave like --reader and show just that document.
+  if (pendingMarkdown.length && !SELFTEST && !CAPTURE) readerOnly = true;
+  if (readerOnly) {
+    if (pendingMarkdown.length) for (const file of pendingMarkdown.splice(0)) await openMarkdownPath(file);
+    else markdownReader.open();
+    if (SELFTEST) {
+      let failed = false;
+      try {
+        await require('./reader-lifecycle-selftest.cjs')({ app, BrowserWindow, Menu, ipcMain,
+          manager: markdownReader, shellState: () => ({ win, tray, recorderShellStarted, shortcuts }) });
+      } catch (error) { failed = true; console.error('  FAIL  reader lifecycle', error); }
+      quitting = true;
+      app.exit(failed ? 1 : 0);
+    }
+    return;
+  }
   createWindow();
-  createTray();
-
-  registerShortcuts();
-  console.log('[miaoji] 快捷键: 录音=' + (shortcuts.toggle || '未注册') + ' 显示窗口=' + (shortcuts.show || '未注册'));
-
-  setInterval(pollLive, 2500);
-  pollLive();
+  startRecorderShell();
+  // Files that arrived while the server was starting.
+  for (const file of pendingMarkdown.splice(0)) openMarkdownPath(file);
 
   if (CAPTURE) await runCapture();
   if (SELFTEST) await runSelfTest();
@@ -931,7 +1210,14 @@ async function main() {
 if (!SELFTEST && !CAPTURE && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', showWindow);
+  app.on('second-instance', (_event, argv) => {
+    // A .md file opened while the app is running goes to a new reader window.
+    const files = markdownPathsFromArgv(argv);
+    if (files.length && markdownReader && serverUrl) files.forEach((file) => openMarkdownPath(file));
+    else if (files.length) pendingMarkdown.push(...files);
+    else if (argv.includes('--reader')) markdownReader?.open();
+    else showWindow();
+  });
 
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
@@ -954,10 +1240,7 @@ if (!SELFTEST && !CAPTURE && !app.requestSingleInstanceLock()) {
     }
   });
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    else showWindow();
-  });
+  app.on('activate', activateWindow);
 
   main().catch((err) => {
     dialog.showErrorBox('巴别回声启动异常', String((err && err.stack) || err));

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Markdown 阅读器 — 巴别回声</title>
+  <link rel="icon" href="/brand-icon.png">
+  <link rel="stylesheet" href="/vendor/markdown/katex.min.css">
+  <link rel="stylesheet" href="/markdown.css">
+  <link rel="stylesheet" href="/reader.css">
+  <script type="module" src="/reader.js"></script>
+</head>
+<body>
+  <header class="reader-toolbar">
+    <div class="reader-brand"><img src="/brand-icon.png" alt=""><div><strong id="readerLabel">Markdown 阅读器</strong><small id="documentName">巴别回声 · Babel Echo</small></div></div>
+    <div class="reader-tools">
+      <button id="readerOpen" type="button">打开 MD</button>
+      <button id="readerSource" type="button" aria-pressed="false">查看源码</button>
+      <label><span class="sr-only">阅读字号</span><select id="readerFont" aria-label="阅读字号"><option value="15">15 px</option><option value="17" selected>17 px</option><option value="19">19 px</option><option value="21">21 px</option></select></label>
+      <label><span class="sr-only">明暗模式</span><select id="readerMode" aria-label="明暗模式"><option value="auto">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+      <button id="readerPdf" type="button" disabled>保存 PDF</button>
+      <button id="readerPrint" class="primary" type="button" disabled>打印</button>
+    </div>
+    <input type="file" id="readerFile" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
+  </header>
+  <div class="reader-layout">
+    <aside class="reader-sidebar"><div class="toc-label" id="tocLabel">文档目录</div><nav id="readerToc" aria-label="文档目录"></nav><p class="reader-local" id="localHint">本地阅读，不自动加载网络图片。</p></aside>
+    <main class="reader-main">
+      <section class="reader-empty" id="readerEmpty"><span class="reader-mark">MD</span><h1 id="emptyTitle">给文字一个清晰的版面</h1><p id="emptyHint">打开本地 Markdown，或从会议摘要进入阅读器。支持表格、图表、公式和打印。</p><button id="readerExample" type="button">查看排版示例</button></section>
+      <article class="reader-paper markdown-rich" id="readerDocument" hidden></article>
+      <pre class="reader-raw" id="readerRaw" hidden></pre>
+    </main>
+  </div>
+  <footer class="reader-status"><span id="readerStatus" role="status" aria-live="polite">准备就绪</span><span id="readerStats"></span></footer>
+</body>
+</html>

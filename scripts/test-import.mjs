@@ -11,11 +11,14 @@ import { execFile } from 'node:child_process';
 import { readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { useServerToken, socketUrl } from './server-auth.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIX = join(HERE, '..', '.probe', 'fixture', 'meeting.wav');
 const MP3 = join(HERE, '..', '.probe', 'fixture', 'meeting.mp3');
 const BASE = process.argv[2] || 'http://127.0.0.1:8777';
+// The server must be started with the same MIAOJI_ACCESS_TOKEN as this script.
+const TOKEN = useServerToken(BASE);
 
 const results = [];
 function check(name, ok, detail) {
@@ -48,7 +51,7 @@ async function main() {
   const id = created.meeting.id;
   console.log('meeting: ' + id);
 
-  const ws = new WebSocket(BASE.replace('http', 'ws') + '/ws?meeting=' + id);
+  const ws = new WebSocket(socketUrl(BASE + '/ws?meeting=' + id, TOKEN));
   let progressEvents = 0;
   let statusEvents = [];
   let importDone = null;

@@ -42,3 +42,30 @@
     Abort
   FunctionEnd
 !macroend
+
+; Markdown reader: register BabelEcho.Markdown as an *option* for .md/.markdown (Open with,
+; and Settings > Default apps > 巴别回声). Windows keeps the default choice with the user, so
+; the installer never takes over .md; the app's menu leads the user to that settings page.
+!macro customInstall
+  WriteRegStr SHCTX "Software\Classes\BabelEcho.Markdown" "" "Markdown 文档"
+  WriteRegStr SHCTX "Software\Classes\BabelEcho.Markdown\DefaultIcon" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
+  WriteRegStr SHCTX "Software\Classes\BabelEcho.Markdown\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+  WriteRegStr SHCTX "Software\Classes\.md\OpenWithProgids" "BabelEcho.Markdown" ""
+  WriteRegStr SHCTX "Software\Classes\.markdown\OpenWithProgids" "BabelEcho.Markdown" ""
+  WriteRegStr SHCTX "Software\BabelEcho\Capabilities" "ApplicationName" "巴别回声"
+  WriteRegStr SHCTX "Software\BabelEcho\Capabilities" "ApplicationDescription" "AI 会议记录工作台与 Markdown 阅读器"
+  WriteRegStr SHCTX "Software\BabelEcho\Capabilities\FileAssociations" ".md" "BabelEcho.Markdown"
+  WriteRegStr SHCTX "Software\BabelEcho\Capabilities\FileAssociations" ".markdown" "BabelEcho.Markdown"
+  WriteRegStr SHCTX "Software\RegisteredApplications" "BabelEcho" "Software\BabelEcho\Capabilities"
+  ; SHCNE_ASSOCCHANGED so Explorer picks the new handler up without a restart.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+!macroend
+
+!macro customUnInstall
+  DeleteRegKey SHCTX "Software\Classes\BabelEcho.Markdown"
+  DeleteRegValue SHCTX "Software\Classes\.md\OpenWithProgids" "BabelEcho.Markdown"
+  DeleteRegValue SHCTX "Software\Classes\.markdown\OpenWithProgids" "BabelEcho.Markdown"
+  DeleteRegKey SHCTX "Software\BabelEcho"
+  DeleteRegValue SHCTX "Software\RegisteredApplications" "BabelEcho"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+!macroend

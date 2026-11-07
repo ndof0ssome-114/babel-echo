@@ -6,7 +6,7 @@
 
 **Turn meeting audio into notes you can revisit.** Babel Echo is a local AI meeting workspace for Windows and Apple Silicon Macs. It can capture your microphone and computer audio together, transcribe as you record, and generate summaries, minutes, and translations.
 
-**源码版本 / Source version:** `0.1.0-beta.4` · 测试中 / in testing · [已发布安装包 beta.3 / Published beta.3](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3)
+**源码版本 / Source version:** `0.1.0-beta.9` · 私有测试版 / private testing · [安装包与 Mac 测试资料 / Packages and Mac test kit](https://github.com/ndof0ssome-114/babelecho-monorepo/releases/tag/desktop-v0.1.0-beta.9)
 
 [简体中文](#简体中文) · [English](#english) · [开发者与 AI 接手文档 / Developer & AI guide](README_AI.md)
 
@@ -24,19 +24,20 @@
 
 ### 开始使用
 
-**安装版：** 从 [预发布页面](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3) 下载 `BabelEcho-0.1.0-beta.3-setup.exe`，在向导中选择安装范围和目录。安装包目前未签名。首次录音前：
+**安装版：** 从 [私有预发布页面](https://github.com/ndof0ssome-114/babelecho-monorepo/releases/tag/desktop-v0.1.0-beta.7) 下载 `BabelEcho-0.1.0-beta.7-setup.exe`，在向导中选择安装范围和目录。安装包目前未签名。首次录音前：
 
 1. 打开「设置」，配置语音识别和文本模型；使用云端服务时填写相应的 API Key。若使用本地模型，请先自行启动模型服务并加载模型。
 2. 选择识别语言与麦克风，点击「测试麦克风」确认有输入。需要录入会议播放声时，勾选「同时录电脑声音」。
 3. 开始录音；结束后在历史记录中回看、导出或生成纪要。
 
-**从源码运行：** 需要 Node.js 20 或更新版本。浏览器模式无需安装 npm 依赖：
+**从源码运行：** 核心服务需要 Node.js 20 或更新版本；构建工具建议 Node.js 24 LTS。首次运行先安装锁定依赖并生成本地 Markdown 资源：
 
 ```powershell
+npm ci --prefix desktop
 node server.mjs 8777
 ```
 
-然后打开 `http://127.0.0.1:8777`。若要运行 Electron 桌面版：
+然后打开终端打印的 `http://127.0.0.1:8777/?token=…` 链接。令牌每次启动都会变化，请勿分享；直接打开不带令牌的地址会显示「需要访问令牌」。若要运行 Electron 桌面版：
 
 ```powershell
 cd desktop
@@ -46,7 +47,33 @@ npm start
 
 **M 芯片 Mac 测试版：** 需要 macOS 13 或更高版本。在 Mac 上执行 `npm ci --prefix desktop`，然后运行 `npm --prefix desktop run dist:mac`，生成 arm64 DMG 和 ZIP。首次勾选「同时录电脑声音」时，macOS 会请求麦克风、屏幕与系统音频录制权限；应用只保留混合后的音频，不保存屏幕画面。macOS 12 及更早版本无法由 Electron 直接采集系统音频。
 
-仓库中的 **Build macOS Apple Silicon** 手动工作流可生成内部测试包；启用 signed 输入前，需要在 GitHub Actions 配置 `MAC_CSC_LINK`、`MAC_CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`。未签名包只适合内部测试，公开下载应使用 Developer ID 签名并完成 Apple 公证。
+仓库根目录的 **Desktop macOS test build** 工作流可生成内部未签名测试包。使用 Node.js 24 LTS，运行 `bash scripts/mac-test.sh verify` 复核源码，或 `bash scripts/mac-test.sh build` 在 Apple Silicon Mac 上构建。完整操作和真机清单见 [Mac 测试交接](../../docs/MAC_TESTING.md)。公开分发前仍需 Developer ID 签名和 Apple 公证。
+
+### beta.9 更新
+
+- 使用场景可选“上课”或“会议”，分别突出知识点/例题/推导与讨论/决策/行动。
+- 纪要默认详细，增加话题解释、步骤、课堂概念、例题及复习问答；可切换标准详细度。已有内容保留，切换后手动重新生成。
+- 导出区域可勾选“Markdown 包含转写全文”；默认不勾选，完整纪要阅读/PDF/打印使用同一范围。
+- [课堂模式与导出说明](../../docs/CLASSROOM_NOTES.md)。
+
+### beta.8 更新
+
+beta.8 修复 Mac 独立阅读器 Dock 激活误开工作台，并为应用和 Helper 增加麦克风签名权限。当前新增发布包为 Mac arm64；Windows beta.8 未构建/验证，Windows 安装仍使用 beta.7。
+
+### beta.7 更新
+
+- 摘要可按事实使用比较表、任务清单、Mermaid 流程图或饼图；保留原有增量上下文及输出预算。
+- 独立 Markdown 阅读器：表格、代码高亮、脚注、公式、图表、目录、字号与明暗模式；可打开本机 MD，不需要配置模型。
+- 摘要和纪要中的“阅读／打印”入口；白底 A4 打印、页码和 PDF 保存。文档和渲染资源在本机处理。
+- [阅读器说明与格式边界](../../docs/MARKDOWN_READER.md)，以及包含排版示例的 Mac 测试资料。
+
+### beta.6 更新
+
+- 原生编辑菜单和文本右键菜单；默认只读取本应用设置中的密钥，不再自动读取其他程序的凭据或环境变量。
+- 会议 JSON 原子替换，保护保存失败前的旧记录；删除后迟到的模型结果不会重新生成会议；录音和导入期间禁止删除。
+- 导入保留 ASR 返回的说话人与时间戳；修复关闭翻译后新会议误用默认翻译目标。
+- 两种主题及独立外观偏好：强调色、阅读字号、圆角、间距、纹理、跟随系统/浅色/深色；Electron 重启后恢复。
+- 10 组离线回归的统一入口 `npm run test:offline`，以及不含用户数据的 Mac 测试资料。
 
 ### 选择模型与控制用量（beta.4）
 
@@ -64,7 +91,7 @@ npm start
 
 音频片段会发送给你选用的语音识别服务；摘要、纪要、翻译或问答所需的文字会发送给你选用的文本模型。本地模型需由你自行运行。录音前请告知相关参与者，并确认所用服务适合处理会议内容。详见 [数据与录音说明](PRIVACY.md) 和 [安全说明](SECURITY.md)。
 
-目前是本机单用户测试版，没有账号同步或云端会议存储；说话人区分的准确度依赖所选引擎。本仓库尚未提供开源许可证，也未发布公开正式版。图标基于使用者提供的角色参考图制作，本仓库不授予第三方复用该角色或图标的许可。
+目前是本机单用户测试版，没有账号同步或云端会议存储；说话人区分的准确度依赖所选引擎。源码采用仓库根目录的 Apache-2.0 许可证，尚未发布正式稳定版。图标基于使用者提供的角色参考图制作，本仓库不授予第三方复用该角色或图标的许可。
 
 开发、测试、接口与排障资料见 [README_AI.md](README_AI.md)。
 
@@ -82,19 +109,19 @@ npm start
 
 ### Get started
 
-**Installer:** Download `BabelEcho-0.1.0-beta.3-setup.exe` from the [prerelease page](https://github.com/ndof0ssome-114/babel-echo/releases/tag/v0.1.0-beta.3), then choose the installation scope and directory. The installer is currently unsigned. Before recording:
+**Installer:** Download `BabelEcho-0.1.0-beta.7-setup.exe` from the [private prerelease](https://github.com/ndof0ssome-114/babelecho-monorepo/releases/tag/desktop-v0.1.0-beta.7), then choose the installation scope and directory. The installer is currently unsigned. Before recording:
 
 1. Open Settings and configure speech and text models. Add API keys for cloud providers. For local models, start the service and load the model yourself.
 2. Choose the recognition language and microphone, then use **Test microphone** to check the input. Enable **Capture computer audio** if you also need meeting playback.
 3. Start recording. Afterwards, open History to review, export, or generate minutes.
 
-**Run from source:** Node.js 20 or newer is required. Browser mode has no npm dependencies:
+**Run from source:** The core server needs Node.js 20 or newer; Node.js 24 LTS is recommended for build tooling. Install locked development dependencies once to generate local Markdown assets:
 
 ```powershell
 node server.mjs 8777
 ```
 
-Open `http://127.0.0.1:8777`. To run the Electron desktop app:
+Open the `http://127.0.0.1:8777/?token=…` link printed in the terminal. The token changes on every launch and should not be shared; the bare address shows “Access token required”. To run the Electron desktop app:
 
 ```powershell
 cd desktop
@@ -104,7 +131,23 @@ npm start
 
 **Apple Silicon Mac test build:** macOS 13 or newer is required. On a Mac, run `npm ci --prefix desktop`, followed by `npm --prefix desktop run dist:mac`, to create arm64 DMG and ZIP packages. The first computer-audio recording asks for microphone, screen, and system-audio permissions. Babel Echo discards the video track and saves audio only. Electron cannot capture system audio directly on macOS 12 or earlier.
 
-The manual **Build macOS Apple Silicon** workflow creates internal test artifacts. A public build should be signed with a Developer ID certificate and notarized by Apple; the workflow supports this after the repository secrets documented in the Chinese section are configured.
+The root **Desktop macOS test build** workflow creates unsigned internal test packages and a synthetic test kit. Use Node.js 24 LTS and `bash scripts/mac-test.sh verify` or `build` from the repository root. See the [Mac handoff checklist](../../docs/MAC_TESTING.md). Public distribution still requires Developer ID signing and notarization.
+
+### Changes in beta.9
+
+Choose Class or Meeting and Detailed (default) or Standard notes per record. Classroom output preserves concepts, derivations, examples and review answers; meeting output preserves discussion context and decisions. Markdown omits the transcript appendix by default in the UI; enable the checkbox to include it in download and full reading/printing. Existing notes remain intact until explicitly regenerated. See the [guide](../../docs/CLASSROOM_NOTES.md).
+
+### Changes in beta.8
+
+Fixes reader-only Dock activation on macOS and microphone entitlements in the app and helpers. New packages target Mac arm64. Windows beta.8 has not been built or tested; Windows installers remain beta.7.
+
+### Changes in beta.7
+
+Adds factual summary tables, task lists and optional Mermaid diagrams; a standalone reader for local Markdown with code highlighting, footnotes, math, charts and an outline; and A4 printing/PDF saving. Open it from the top toolbar or the summary/minutes “Read / print” buttons. Rendering uses bundled local assets. See the [reader guide](../../docs/MARKDOWN_READER.md).
+
+### Changes in beta.6
+
+Adds native edit/context menus, app-local credentials by default, atomic meeting saves, deleted-meeting callback guards, preserved import speaker timestamps, explicit translation-disable handling, and two customizable themes with persistent desktop preferences. `npm run test:offline` runs all ten offline suites. Test materials contain generated tones and silence only.
 
 ### Models and usage controls (beta.4)
 
@@ -122,6 +165,6 @@ The desktop app keeps meetings, recordings, settings, and saved API keys in `%AP
 
 Audio segments go to the speech service you select. Text needed for summaries, minutes, translation, or Q&A goes to your selected text model. You must run local model services yourself. Inform meeting participants before recording and make sure your chosen providers are appropriate for the content. See [Privacy and recording](PRIVACY.md) and [Security](SECURITY.md).
 
-This is a single-user local beta with no account sync or cloud meeting storage. Speaker separation depends on the selected engine. There is no open-source license or public stable release yet. The icon was made from a character reference supplied by the project user; this repository does not grant others permission to reuse that character or icon.
+This is a single-user local beta with no account sync or cloud meeting storage. Speaker separation depends on the selected engine. Source code uses the root Apache-2.0 license; no stable release is available yet. The icon was made from a character reference supplied by the project user; this repository does not grant others permission to reuse that character or icon.
 
 For architecture, APIs, tests, and troubleshooting, see [README_AI.md](README_AI.md).

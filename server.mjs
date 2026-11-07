@@ -7,19 +7,20 @@
 // which keeps the hot path allocation-light.
 
 import { createServer } from 'node:http';
-import { createReadStream, existsSync, statSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
-import { isTrustedLocalRequest } from './lib/local-access.mjs';
+import { createReadStream, createWriteStream, existsSync, statSync, unlinkSync, mkdirSync } from 'node:fs';
+import { isTrustedLocalRequest, resolveAccessToken, requestAccess, accessCookieHeader, accessCookieName } from './lib/local-access.mjs';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { join, extname, normalize } from 'node:path';
-import { loadConfig, saveConfig, deleteCustomProvider, ensureDirs, providerStatus, ROOT, UPLOAD_DIR, DEFAULT_CONFIG } from './lib/config.mjs';
-import { loadCreds, setLocalCred, LOCAL_CRED_PATH, CRED_PATH } from './lib/env.mjs';
+import { loadConfig, saveConfig, deleteCustomProvider, ensureDirs, providerStatus, assertSafeEndpoint, ROOT, UPLOAD_DIR, DEFAULT_CONFIG } from './lib/config.mjs';
+import { loadCreds, setLocalCred, LOCAL_CRED_PATH } from './lib/env.mjs';
 import { createAsrRegistry } from './lib/asr/index.mjs';
 import { createLlm } from './lib/llm.mjs';
-import { Meeting, toMarkdown, toVtt, formatDuration } from './lib/meeting.mjs';
+import { Meeting, toMarkdown, toVtt, toSrt, formatDuration } from './lib/meeting.mjs';
 import * as store from './lib/store.mjs';
 import { attachWebSocket } from './lib/ws.mjs';
 import { importMedia } from './lib/import.mjs';
+import { recoverInterruptedRecordings } from './lib/recovery.mjs';
 
 // A meeting recorder that dies because of one bad socket is useless, so a
 // stray exception is logged loudly and the process carries on.
@@ -31,6 +32,8 @@ process.on('unhandledRejection', (err) => {
 });
 
 ensureDirs();
+const accessToken = resolveAccessToken();
+recoverInterruptedRecordings();
 const creds = loadCreds();
 const config = loadConfig();
 const asr = createAsrRegistry(config, creds);
@@ -40,6 +43,20 @@ const MEDIA_RE = /\.(wav|mp3|m4a|mp4|mov|webm|ogg|oga|flac|aac|wma|mkv|avi|opus|
 
 /** Live meeting objects, keyed by id. */
 const meetings = new Map();
+
+// Opening history loads a meeting object that would otherwise stay in memory
+// for the life of the process. Finished meetings nobody has touched for a
+// while are dropped; the next request reloads them from disk.
+const IDLE_EVICT_MS = 30 * 60 * 1000;
+function evictIdleMeetings(now = Date.now()) {
+  for (const [id, m] of meetings) {
+    if (m.state !== 'stopped' || m.listeners.size || m.stopping || m.summarizing || m.translating ||
+        m.saveTimer || m.busy || now - (m.lastActivityAt || 0) < IDLE_EVICT_MS) continue;
+    m.dispose();
+    meetings.delete(id);
+  }
+}
+setInterval(evictIdleMeetings, 5 * 60 * 1000).unref();
 
 function getMeeting(id) {
   if (meetings.has(id)) return meetings.get(id);
@@ -56,6 +73,8 @@ function createMeeting(body) {
     id,
     title: body?.title || '未命名会议',
     language: body?.language || 'auto',
+    mode: body?.mode,
+    notesDetail: body?.notesDetail,
     translateTo: body?.translateTo === undefined ? config.translate.target : body.translateTo,
     config,
     asr,
@@ -90,6 +109,8 @@ function startImport(meeting, inputPath, removeAfter) {
       meeting.state = 'stopped';
       meeting.emit('status', { state: meeting.state });
       meeting.emit('error', { message: '导入失败：' + err.message, fatal: true });
+      // Persist the end state so the list does not show a dead import as running.
+      meeting.save();
     })
     .finally(() => {
       if (removeAfter) {
@@ -150,6 +171,40 @@ async function readJson(req) {
   }
 }
 
+/** Stream a request body to disk, refusing bodies larger than `limit` bytes. */
+function receiveToFile(req, path, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    let failed = false;
+    const out = createWriteStream(path, { flags: 'wx' });
+    const fail = (err) => {
+      if (failed) return;
+      failed = true;
+      req.unpipe(out);
+      out.destroy();
+      req.resume();
+      try { unlinkSync(path); } catch { /* never created */ }
+      reject(err);
+    };
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) fail(new Error('上传文件过大（上限 ' + Math.round(limit / 1024 / 1024) + ' MB）'));
+    });
+    req.on('error', fail);
+    req.on('aborted', () => fail(new Error('上传被中断')));
+    out.on('error', fail);
+    out.on('finish', () => { if (!failed) resolve(size); });
+    req.pipe(out);
+  });
+}
+
+/** Content-Disposition that keeps non-ASCII titles readable in every browser. */
+function attachmentHeader(base, ext) {
+  const name = base + ext;
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  return 'attachment; filename="' + ascii + '"; filename*=UTF-8\'\'' + encodeURIComponent(name);
+}
+
 function streamAudio(req, res, id) {
   const found = store.findAudio(id);
   if (!found) return sendJson(res, 404, { error: 'no audio for this meeting' });
@@ -161,10 +216,19 @@ function streamAudio(req, res, id) {
 
   const range = req.headers.range;
   if (range) {
-    const m = /bytes=(\d*)-(\d*)/.exec(range);
-    const start = m && m[1] ? parseInt(m[1], 10) : 0;
-    const end = m && m[2] ? parseInt(m[2], 10) : found.size - 1;
-    if (start >= found.size || end >= found.size || start > end) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+    let start;
+    let end;
+    if (m && !m[1] && m[2]) {
+      // Suffix range: the last N bytes.
+      start = Math.max(0, found.size - parseInt(m[2], 10));
+      end = found.size - 1;
+    } else {
+      start = m && m[1] ? parseInt(m[1], 10) : 0;
+      // An end past the file is clamped, as RFC 9110 requires.
+      end = m && m[2] ? Math.min(parseInt(m[2], 10), found.size - 1) : found.size - 1;
+    }
+    if (!m || start >= found.size || start > end) {
       res.writeHead(416, { 'content-range': 'bytes */' + found.size });
       return res.end();
     }
@@ -213,6 +277,7 @@ function bootstrap(lite = false) {
       translate: config.translate,
       realtime: config.realtime,
       summary: config.summary,
+      speakers: config.speakers,
     },
   };
 }
@@ -251,7 +316,7 @@ async function handleApi(req, res, url) {
     if (method === 'GET') {
       // Report which refs are satisfied, never the values themselves.
       return sendJson(res, 200, {
-        sources: { central: CRED_PATH, local: LOCAL_CRED_PATH },
+        sources: { local: LOCAL_CRED_PATH, environment: process.env.MIAOJI_ALLOW_ENV_CREDENTIALS === '1' },
         configured: Object.keys(creds).filter((k) => /^[A-Z][A-Z0-9_]*$/.test(k)),
       });
     }
@@ -298,6 +363,7 @@ async function handleApi(req, res, url) {
     try {
       const key = creds[provider.keyRef];
       if (!key && !provider.noAuth) return sendJson(res, 400, { error: '请先配置 API Key' });
+      try { assertSafeEndpoint(provider.baseUrl, provider.label); } catch (err) { return sendJson(res, 400, { error: err.message }); }
       const response = await fetch(provider.baseUrl.replace(/\/+$/, '') + '/models', {
         headers: key ? { authorization: (provider.kind === 'deepgram' ? 'Token ' : 'Bearer ') + key } : {},
         signal: AbortSignal.timeout(10000),
@@ -328,6 +394,8 @@ async function handleApi(req, res, url) {
       if (method === 'GET') return sendJson(res, 200, { meetings: store.listMeetings() });
       if (method === 'POST') {
         const body = await readJson(req);
+        if (body.mode !== undefined && !['meeting', 'class'].includes(body.mode) ||
+            body.notesDetail !== undefined && !['standard', 'detailed'].includes(body.notesDetail)) return sendJson(res, 400, { error: '无效的笔记选项' });
         const m = createMeeting(body);
         return sendJson(res, 200, { meeting: m.snapshot() });
       }
@@ -338,14 +406,27 @@ async function handleApi(req, res, url) {
     const doc = live ? live.snapshot() : store.loadMeeting(id);
 
     if (rest.length === 2) {
+      if (method === 'PATCH') {
+        const m = getMeeting(id);
+        if (!m) return sendJson(res, 404, { error: 'not found' });
+        try {
+          m.setNoteOptions(await readJson(req));
+          m.emit('meta', { title: m.title, language: m.language, translateTo: m.translateTo, mode: m.mode, notesDetail: m.notesDetail });
+          m.save();
+          return sendJson(res, 200, { meeting: m.snapshot() });
+        } catch (error) { return sendJson(res, 400, { error: error.message }); }
+      }
       if (method === 'GET') {
         if (!doc) return sendJson(res, 404, { error: 'not found' });
         return sendJson(res, 200, { meeting: doc });
       }
       if (method === 'DELETE') {
         const m = meetings.get(id);
+        if (m && ['recording', 'paused', 'processing'].includes(m.state)) {
+          return sendJson(res, 409, { error: '请先等待当前录音或导入结束再删除会议' });
+        }
         if (m) {
-          m.stopTimers();
+          m.dispose();
           meetings.delete(id);
         }
         return sendJson(res, 200, { ok: store.deleteMeeting(id) });
@@ -364,18 +445,18 @@ async function handleApi(req, res, url) {
         const text = JSON.stringify(doc, null, 2);
         res.writeHead(200, {
           'content-type': 'application/json; charset=utf-8',
-          'content-disposition': 'attachment; filename="' + encodeURIComponent(base) + '.json"',
+          'content-disposition': attachmentHeader(base, '.json'),
         });
         return res.end(text);
       }
       if (format === 'vtt' || format === 'srt') {
         const useTr = url.searchParams.get('translated') === '1';
-        const text = toVtt(doc, useTr);
+        const srt = format === 'srt';
         res.writeHead(200, {
-          'content-type': 'text/vtt; charset=utf-8',
-          'content-disposition': 'attachment; filename="' + encodeURIComponent(base) + '.vtt"',
+          'content-type': (srt ? 'application/x-subrip' : 'text/vtt') + '; charset=utf-8',
+          'content-disposition': attachmentHeader(base, srt ? '.srt' : '.vtt'),
         });
-        return res.end(text);
+        return res.end(srt ? toSrt(doc, useTr) : toVtt(doc, useTr));
       }
       if (format === 'txt') {
         const text = (doc.segments || [])
@@ -383,14 +464,14 @@ async function handleApi(req, res, url) {
           .join('\n');
         res.writeHead(200, {
           'content-type': 'text/plain; charset=utf-8',
-          'content-disposition': 'attachment; filename="' + encodeURIComponent(base) + '.txt"',
+          'content-disposition': attachmentHeader(base, '.txt'),
         });
         return res.end(text);
       }
-      const text = toMarkdown(doc);
+      const text = toMarkdown(doc, { includeTranscript: url.searchParams.get('includeTranscript') !== '0' });
       res.writeHead(200, {
         'content-type': 'text/markdown; charset=utf-8',
-        'content-disposition': 'attachment; filename="' + encodeURIComponent(base) + '.md"',
+        'content-disposition': attachmentHeader(base, '.md'),
       });
       return res.end(text);
     }
@@ -436,6 +517,22 @@ async function handleApi(req, res, url) {
           return sendJson(res, 500, { error: err.message });
         }
       }
+      if (body.action === 'diarize') {
+        try {
+          const result = await m.diarizeRecording();
+          return sendJson(res, 200, { ...result, speakers: m.speakers, segments: m.segments });
+        } catch (err) {
+          return sendJson(res, 500, { error: err.message });
+        }
+      }
+      if (body.action === 'undo-diarize') {
+        try {
+          m.undoDiarization();
+          return sendJson(res, 200, { speakers: m.speakers, segments: m.segments });
+        } catch (err) {
+          return sendJson(res, 400, { error: err.message });
+        }
+      }
       return sendJson(res, 400, { error: 'unknown speakers action' });
     }
 
@@ -452,6 +549,10 @@ async function handleApi(req, res, url) {
         // the server reads it off local disk instead of pushing hundreds of
         // megabytes through the IPC channel.
         const body = await readJson(req);
+        if (m.disposed) return sendJson(res, 404, { error: '会议已删除' });
+        if (['recording', 'paused', 'processing'].includes(m.state)) {
+          return sendJson(res, 409, { error: '请先等待当前录音或导入结束' });
+        }
         const raw = String(body.path || '');
         if (!raw || !existsSync(raw) || !statSync(raw).isFile()) {
           return sendJson(res, 400, { error: '文件不存在或不可读' });
@@ -462,13 +563,25 @@ async function handleApi(req, res, url) {
         inputPath = raw;
         removeAfter = false;
       } else {
-        const buf = await readBody(req, 2048 * 1024 * 1024);
-        if (!buf.length) return sendJson(res, 400, { error: '上传内容为空' });
         const name = url.searchParams.get('name') || 'upload.bin';
         const safe = name.replace(/[^\w.\-\u4e00-\u9fff]/g, '_').slice(-80);
-        inputPath = join(UPLOAD_DIR, id + '-' + Date.now() + '-' + safe);
         mkdirSync(UPLOAD_DIR, { recursive: true });
-        writeFileSync(inputPath, buf);
+        const target = join(UPLOAD_DIR, id + '-' + Date.now() + '-' + randomBytes(3).toString('hex') + '-' + safe);
+        // Large media goes straight to disk instead of being held in memory.
+        let size;
+        try {
+          size = await receiveToFile(req, target, 2048 * 1024 * 1024);
+        } catch (err) {
+          return sendJson(res, 413, { error: err.message });
+        }
+        const discard = () => { try { unlinkSync(target); } catch { /* best effort */ } };
+        if (m.disposed) { discard(); return sendJson(res, 404, { error: '会议已删除' }); }
+        if (['recording', 'paused', 'processing'].includes(m.state)) {
+          discard();
+          return sendJson(res, 409, { error: '请先等待当前录音或导入结束' });
+        }
+        if (!size) { discard(); return sendJson(res, 400, { error: '上传内容为空' }); }
+        inputPath = target;
       }
 
       m.state = 'processing';
@@ -484,11 +597,47 @@ async function handleApi(req, res, url) {
 
 // -- HTTP server ------------------------------------------------------------
 
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+function sendHtml(res, status, body, headers = {}) {
+  const text = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+    + '<title>巴别回声 Babel Echo</title>' + body;
+  res.writeHead(status, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': Buffer.byteLength(text),
+    'cache-control': 'no-store',
+    'referrer-policy': 'no-referrer',
+    ...headers,
+  });
+  res.end(text);
+}
+
+// A link carrying ?token= is exchanged for an HttpOnly cookie. The follow-up
+// navigation starts from this local page, so the SameSite=Strict cookie is
+// sent even when the link was opened from another site or application.
+function exchangeAccessToken(req, res, url) {
+  const clean = new URL(url);
+  clean.searchParams.delete('token');
+  const target = escapeHtml(clean.pathname + clean.search);
+  sendHtml(res, 200, `<meta http-equiv="refresh" content="0;url=${target}"><p><a href="${target}">继续 / Continue</a></p>`,
+    { 'set-cookie': accessCookieHeader(req.socket.localPort, accessToken) });
+}
+
+function sendUnauthorized(res, url) {
+  if (url.pathname.startsWith('/api/')) return sendJson(res, 401, { error: 'access token required' });
+  sendHtml(res, 401, '<p>需要访问令牌。请打开启动服务时终端打印的完整链接，或在桌面版托盘菜单中选择「在浏览器中打开」。</p>'
+    + '<p>Access token required. Open the full link printed when the server started, or use “Open in browser” from the desktop tray menu.</p>');
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://' + (req.headers.host || 'localhost'));
   try {
     if (!isTrustedLocalRequest(req)) return sendJson(res, 403, { error: 'local request required' });
-    if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
+    const isApi = url.pathname.startsWith('/api/');
+    const access = requestAccess(req, url, accessToken, { allowQuery: !isApi && req.method === 'GET' });
+    if (!access) return sendUnauthorized(res, url);
+    if (access === 'query') return exchangeAccessToken(req, res, url);
+    if (isApi) return await handleApi(req, res, url);
     return await serveStatic(res, url.pathname);
   } catch (err) {
     if (!res.headersSent) sendJson(res, 500, { error: err.message });
@@ -500,7 +649,7 @@ const server = createServer(async (req, res) => {
 
 attachWebSocket(server, {
   path: '/ws',
-  allowRequest: isTrustedLocalRequest,
+  allowRequest: (req, url) => isTrustedLocalRequest(req) && !!requestAccess(req, url, accessToken, { allowQuery: true }),
   onConnection(ws, req, url) {
     const id = url.searchParams.get('meeting');
     let meeting = id ? getMeeting(id) : null;
@@ -509,7 +658,9 @@ attachWebSocket(server, {
       meeting = createMeeting({
         title: url.searchParams.get('title') || '未命名会议',
         language: url.searchParams.get('language') || 'auto',
-        translateTo: url.searchParams.get('translateTo') || config.translate.target,
+        mode: url.searchParams.get('mode'),
+        notesDetail: url.searchParams.get('notesDetail'),
+        translateTo: url.searchParams.get('translateTo') ?? config.translate.target,
       });
     }
     if (!meeting) {
@@ -531,10 +682,17 @@ attachWebSocket(server, {
     ws.send({ type: 'segments', segments: meeting.segments });
 
     ws.on('message', async (raw, isBinary) => {
+      if (meeting.disposed) {
+        ws.send({ type: 'error', message: '会议已删除', fatal: true });
+        return;
+      }
       if (isBinary) {
         // Wire format: raw little-endian Int16 PCM at config.audio.sampleRate.
         const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
-        const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length);
+        // Int16Array needs an even byte count; a torn trailing byte is dropped.
+        const usable = buf.length & ~1;
+        if (!usable) return;
+        const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + usable);
         meeting.ingest(new Int16Array(ab));
         return;
       }
@@ -547,6 +705,7 @@ attachWebSocket(server, {
       try {
         switch (msg.type) {
           case 'start':
+            meeting.setNoteOptions(msg);
             if (msg.title) meeting.title = msg.title;
             if (msg.language) meeting.language = msg.language;
             if (msg.translateTo !== undefined) meeting.translateTo = msg.translateTo;
@@ -559,16 +718,23 @@ attachWebSocket(server, {
             meeting.resume();
             break;
           case 'stop':
+            // An import owns "processing" and finishes itself; a second click
+            // while stopping must not generate the minutes twice.
+            if (meeting.state === 'processing' || meeting.state === 'stopped') break;
             await meeting.stop();
-            // The button says "结束并生成纪要", so actually generate them.
-            try {
-              await meeting.generateMinutes();
-            } catch (err) {
-              ws.send({ type: 'error', message: '生成纪要失败：' + err.message, fatal: false });
+            // Minutes follow by default; the client can opt out and create
+            // them later from the next-step card.
+            if (msg.minutes !== false) {
+              try {
+                await meeting.generateMinutes();
+              } catch (err) {
+                ws.send({ type: 'error', message: '生成纪要失败：' + err.message, fatal: false, minutes: true });
+              }
             }
             ws.send({ type: 'stats', stats: meeting.stats });
             break;
           case 'config-patch':
+            meeting.setNoteOptions(msg);
             if (msg.language) meeting.language = msg.language;
             if (msg.translateTo !== undefined) meeting.translateTo = msg.translateTo;
             if (msg.title) meeting.title = msg.title;
@@ -576,6 +742,8 @@ attachWebSocket(server, {
               title: meeting.title,
               language: meeting.language,
               translateTo: meeting.translateTo,
+              mode: meeting.mode,
+              notesDetail: meeting.notesDetail,
             });
             meeting.scheduleSave();
             break;
@@ -583,7 +751,11 @@ attachWebSocket(server, {
             await meeting.summarize();
             break;
           case 'minutes':
-            await meeting.generateMinutes(msg.targetLang);
+            try {
+              await meeting.generateMinutes(msg.targetLang);
+            } catch (err) {
+              ws.send({ type: 'error', message: '生成纪要失败：' + err.message, fatal: false, minutes: true });
+            }
             break;
           case 'ask':
             await meeting.ask(String(msg.question || '').slice(0, 2000));
@@ -591,8 +763,19 @@ attachWebSocket(server, {
           case 'rename-speaker':
             meeting.renameSpeaker(msg.from, msg.to);
             break;
+          case 'set-segment-speaker':
+            meeting.setSegmentSpeaker(msg.index, msg.speaker);
+            break;
           case 'resplit-speakers':
             await meeting.resplitSpeakers();
+            break;
+          case 'diarize-speakers': {
+            const result = await meeting.diarizeRecording();
+            if (result) ws.send({ type: 'diarize-done', ...result });
+            break;
+          }
+          case 'undo-diarize':
+            meeting.undoDiarization();
             break;
           case 'stats':
             ws.send({ type: 'stats', stats: meeting.stats });
@@ -615,10 +798,11 @@ attachWebSocket(server, {
     ws.on('close', () => {
       unsubscribe();
       const m = ws.data.meeting;
-      // An abandoned live recording is stopped so its audio is flushed.
-      if (m && m.state === 'recording' && m.listeners.size === 0) {
+      // An abandoned live or paused recording is stopped so its audio is flushed.
+      const live = () => m.state === 'recording' || m.state === 'paused';
+      if (m && live() && m.listeners.size === 0) {
         setTimeout(() => {
-          if (m.listeners.size === 0 && m.state === 'recording') m.stop().catch(() => {});
+          if (m.listeners.size === 0 && live()) m.stop().catch(() => {});
         }, 20000).unref?.();
       }
     });
@@ -644,10 +828,13 @@ server.listen(requestedPort, host, () => {
     port: actualPort,
     pid: process.pid,
     cwd: process.cwd(),
+    accessToken,
+    accessCookie: accessCookieName(actualPort),
   }));
   console.log('');
   console.log('  巴别回声 Babel Echo — AI 会议记录工作台');
-  console.log('  ' + url);
+  console.log('  ' + url + '?token=' + accessToken);
+  console.log('  （此链接含本次启动的访问令牌，请勿分享 / This link carries the access token for this launch; do not share it）');
   console.log('');
   console.log('  语音识别:');
   const status = providerStatus(config, creds);
@@ -669,7 +856,7 @@ server.listen(requestedPort, host, () => {
 /** Stop every live recording so its audio and transcript are flushed. */
 async function shutdown(reason) {
   for (const m of meetings.values()) {
-    if (m.state === 'recording' || m.state === 'paused') {
+    if (m.state === 'recording' || m.state === 'paused' || m.stopping) {
       try {
         await m.stop();
       } catch {
