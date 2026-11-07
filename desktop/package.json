@@ -1,10 +1,19 @@
 {
   "name": "babel-echo-desktop",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.10",
   "private": true,
   "description": "巴别回声 桌面版（Electron 外壳）",
   "main": "main.cjs",
   "scripts": {
+    "postinstall": "node ../scripts/build-markdown-vendor.mjs",
+    "prestart": "node ../scripts/build-markdown-vendor.mjs",
+    "pretest": "node ../scripts/build-markdown-vendor.mjs",
+    "predist": "node ../scripts/build-markdown-vendor.mjs",
+    "predist:installer": "node ../scripts/build-markdown-vendor.mjs",
+    "predist:portable": "node ../scripts/build-markdown-vendor.mjs",
+    "predist:dir": "node ../scripts/build-markdown-vendor.mjs",
+    "predist:mac": "node ../scripts/build-markdown-vendor.mjs",
+    "predist:mac:dir": "node ../scripts/build-markdown-vendor.mjs",
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "electron . --selftest",
@@ -17,8 +26,18 @@
     "dist:mac:dir": "electron-builder --mac dir --arm64"
   },
   "devDependencies": {
+    "dompurify": "3.4.17",
     "electron": "^44.4.5",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "0.28.2",
+    "highlight.js": "11.12.0",
+    "jsdom": "30.1.3",
+    "katex": "0.19.0",
+    "markdown-it": "15.0.3",
+    "markdown-it-footnote": "4.0.0",
+    "markdown-it-task-lists": "2.1.1",
+    "markdown-it-texmath": "1.0.0",
+    "mermaid": "12.2.0"
   },
   "build": {
     "appId": "com.miaoji.desktop",
@@ -29,8 +48,14 @@
     "files": [
       "main.cjs",
       "preload.cjs",
+      "reader-preload.cjs",
+      "markdown-reader.cjs",
+      "markdown-files.cjs",
+      "reader-selftest.cjs",
       "build/icon.png",
-      "build/icon.ico"
+      "build/icon.ico",
+      "reader-lifecycle-selftest.cjs",
+      "synthetic-microphone.cjs"
     ],
     "extraResources": [
       {
@@ -66,24 +91,71 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "巴别回声需要使用麦克风录制并转写会议语音。",
         "NSAudioCaptureUsageDescription": "巴别回声在你启用电脑声音时采集系统播放的音频；不会保存屏幕画面。",
-        "NSScreenCaptureUsageDescription": "巴别回声需要系统录制权限来获取电脑播放的音频；不会保存屏幕画面。"
-      }
+        "NSScreenCaptureUsageDescription": "巴别回声需要系统录制权限来获取电脑播放的音频；不会保存屏幕画面。",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Markdown 文档",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "net.daringfireball.markdown"
+            ],
+            "CFBundleTypeExtensions": [
+              "md",
+              "markdown"
+            ]
+          }
+        ],
+        "UTImportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "net.daringfireball.markdown",
+            "UTTypeDescription": "Markdown 文档",
+            "UTTypeConformsTo": [
+              "public.plain-text"
+            ],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "md",
+                "markdown"
+              ],
+              "public.mime-type": [
+                "text/markdown"
+              ]
+            }
+          }
+        ]
+      },
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "title": "巴别回声 ${version}",
       "contents": [
-        { "x": 150, "y": 180, "type": "file" },
-        { "x": 390, "y": 180, "type": "link", "path": "/Applications" }
+        {
+          "x": 150,
+          "y": 180,
+          "type": "file"
+        },
+        {
+          "x": 390,
+          "y": 180,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "portable": {

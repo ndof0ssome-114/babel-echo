@@ -6,6 +6,9 @@
 // committed segments, rolling summary, minutes, answers).
 
 import { applyStaticTranslations, translate } from './i18n.js';
+import { appearanceSettings } from './appearance-settings.js';
+import { TASKS, effectiveAsr, routeRepairs, rolesFor, setupState, supportsLanguage, taskProblems } from './quick-setup.js';
+import { renderMarkdownInto, cancelMarkdownRender } from './markdown.js';
 
 // --------------------------------------------------------------------------
 // tiny DOM helpers
@@ -42,44 +45,32 @@ function fmtClock(ms) {
   return hh ? hh + ':' + mm + ':' + ss : mm + ':' + ss;
 }
 
-/** Escape then apply the small markdown subset the models actually emit. */
-function renderMarkdown(text) {
-  const esc = (s) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const lines = esc(text || '').split(/\r?\n/);
-  const out = [];
-  let inList = false;
-  const closeList = () => {
-    if (inList) {
-      out.push('</ul>');
-      inList = false;
-    }
-  };
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    const heading = /^(#{1,4})\s+(.*)$/.exec(line);
-    const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
-    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    if (heading) {
-      closeList();
-      const level = Math.min(4, heading[1].length + 1);
-      out.push('<h' + level + '>' + bold(heading[2]) + '</h' + level + '>');
-    } else if (bullet || numbered) {
-      if (!inList) {
-        out.push('<ul>');
-        inList = true;
+function renderSummary(text) {
+  state.summaryText = text || '';
+  renderMarkdownInto(els.summaryBody, state.summaryText, { idPrefix: 'summary-' })
+    .catch(() => { els.summaryBody.textContent = state.summaryText; });
+}
+
+async function openReader(view = '') {
+  try {
+    const id = state.meeting?.id;
+    if (view && !id) return showBanner(t('请先选择会议'), 'warn');
+    if (view === 'summary' && !state.summaryText) return showBanner(t('尚未生成'), 'warn');
+    if (window.miaojiDesktop?.openMarkdownReader) {
+      let text = view === 'summary' ? state.summaryText : '';
+      if (view === 'full') {
+        const response = await fetch('/api/meetings/' + id + '/export?format=md&includeTranscript=' + (els.includeTranscript.checked ? '1' : '0'));
+        if (!response.ok) throw new Error(t('无法读取会议'));
+        text = await response.text();
       }
-      out.push('<li>' + bold((bullet || numbered)[1]) + '</li>');
-    } else if (!line.trim()) {
-      closeList();
+      await window.miaojiDesktop.openMarkdownReader({ text, title: view ? els.title.value : t('Markdown 阅读器'), language: state.uiLanguage });
     } else {
-      closeList();
-      out.push('<p>' + bold(line) + '</p>');
+      const query = new URLSearchParams({ ui: state.uiLanguage });
+      if (view) { query.set('meeting', id); query.set('view', view); }
+      query.set('includeTranscript', els.includeTranscript.checked ? '1' : '0');
+      window.open('/reader.html?' + query, '_blank', 'noopener,noreferrer');
     }
-  }
-  closeList();
-  return out.join('');
+  } catch (error) { showBanner(error.message, 'error'); }
 }
 
 // --------------------------------------------------------------------------
@@ -89,11 +80,17 @@ function renderMarkdown(text) {
 const state = {
   uiLanguage: localStorage.getItem('miaoji-ui-language') || 'zh',
   meeting: null,
+  summaryText: '',
   segments: [],
   segmentEls: new Map(),
   liveEl: null,
   ws: null,
   retry: 0,
+  // Audio captured while the socket reconnects; the server is the only
+  // place a browser recording is saved, so it must not be dropped.
+  pendingAudio: [],
+  pendingAudioBytes: 0,
+  droppedAudioBytes: 0,
   recording: false,
   paused: false,
   startedAt: 0,
@@ -112,6 +109,10 @@ const state = {
   microphoneListLoaded: false,
   listeningDeviceChanges: false,
   settingsOpen: new Set(),
+  nextStepFor: null,
+  minutesPending: false,
+  speakerMenu: null,
+  settingsWarning: '',
   status: null,
   bars: new Array(160).fill(0),
   sending: true,
@@ -161,10 +162,23 @@ const els = {
   fileInput: $('#fileInput'),
   btnHistory: $('#btnHistory'),
   btnSettings: $('#btnSettings'),
-  btnTheme: $('#btnTheme'),
+  btnReader: $('#btnReader'),
+  btnReadSummary: $('#btnReadSummary'),
+  btnReadMinutes: $('#btnReadMinutes'),
+  noteMode: $('#noteMode'),
+  notesDetail: $('#notesDetail'),
+  includeTranscript: $('#includeTranscript'),
+  exportMenu: $('#exportMenu'),
+  exportEmpty: $('#exportEmpty'),
+  btnMoreOptions: $('#btnMoreOptions'),
+  moreOptions: $('#moreOptions'),
+  autoMinutes: $('#autoMinutes'),
+  nextStep: $('#nextStep'),
   btnResummarize: $('#btnResummarize'),
   btnMinutes: $('#btnMinutes'),
   btnResplit: $('#btnResplit'),
+  btnDiarize: $('#btnDiarize'),
+  btnUndoDiarize: $('#btnUndoDiarize'),
 };
 
 const DEFAULT_TITLE = '未命名会议';
@@ -193,16 +207,80 @@ function updateUiLanguage() {
     if (state.meeting.minutes) renderMinutes(state.meeting.minutes);
   }
   if (state.status) applyStatus(state.status);
+  updateNoteLabels();
+  updateExportLinks(state.meeting?.id);
+  renderNextStep();
 }
 
 // --------------------------------------------------------------------------
 // banner
 // --------------------------------------------------------------------------
 
+// Problems the user fixes in settings: missing keys, unusable engines.
+const SETTINGS_HINT = /密钥|API Key|引擎|模型服务|キー|エンジン|provider|\bkey\b|401|403/i;
+
 function showBanner(message, kind) {
   els.banner.hidden = !message;
-  els.banner.textContent = message || '';
   els.banner.dataset.kind = kind || 'info';
+  els.banner.replaceChildren(h('span', { text: message || '' }));
+  if (message && ['error', 'warn'].includes(kind) && SETTINGS_HINT.test(message)) {
+    els.banner.append(h('button', { type: 'button', class: 'btn tiny', text: t('去设置'), onclick: () => openSettings('quick') }));
+  }
+}
+
+// --------------------------------------------------------------------------
+// next step after a recording or import ends
+// --------------------------------------------------------------------------
+
+function showNextStep() {
+  state.nextStepFor = state.meeting?.id || null;
+  renderNextStep();
+}
+
+function renderNextStep() {
+  const m = state.meeting;
+  const card = els.nextStep;
+  if (!m || state.nextStepFor !== m.id || m.state !== 'stopped') {
+    card.hidden = true;
+    return;
+  }
+  const classroom = els.noteMode.value === 'class';
+  const notesLabel = classroom ? '课程笔记' : '纪要';
+  const openTab = (tab) => document.querySelector(`.tabs button[data-tab="${tab}"]`)?.click();
+  const minutes = state.minutesPending
+    ? h('button', { type: 'button', class: 'btn primary tiny', disabled: true, text: t('正在生成' + notesLabel + '…') })
+    : m.minutes
+      ? h('button', { type: 'button', class: 'btn primary tiny', text: t('查看' + notesLabel), onclick: () => openTab('minutes') })
+      : h('button', { type: 'button', class: 'btn primary tiny', text: t('生成' + notesLabel), onclick: () => {
+        if (!state.segments.length) return showBanner(t('还没有转写内容。'), 'warn');
+        requestMinutes();
+      } });
+  const diarize = !els.btnDiarize.hidden
+    ? h('button', { type: 'button', class: 'btn tiny', text: t('整场校正说话人'), onclick: diarizeSpeakers })
+    : null;
+  card.hidden = false;
+  card.replaceChildren(
+    h('div', { class: 'next-step-text' },
+      h('strong', { text: t('录音已结束') }),
+      h('span', { class: 'muted small', text: fmtClock(m.durationMs || state.elapsedBase) + ' · ' + state.segments.length + ' ' + t('条') })),
+    h('div', { class: 'next-step-actions' },
+      minutes, diarize,
+      h('button', { type: 'button', class: 'btn tiny', text: t('导出'), onclick: () => {
+        els.exportMenu.open = true;
+        els.exportMenu.querySelector('a:not([hidden])')?.focus();
+      } }),
+      h('button', { type: 'button', class: 'btn tiny', text: t('新建会议'), onclick: () => startNewMeeting() }),
+      h('button', { type: 'button', class: 'btn ghost icon tiny', 'aria-label': t('关闭'), text: '×', onclick: () => {
+        state.nextStepFor = null;
+        renderNextStep();
+      } })));
+}
+
+function requestMinutes() {
+  state.minutesPending = true;
+  els.minutesMeta.textContent = t('正在生成…');
+  send({ type: 'minutes' });
+  renderNextStep();
 }
 
 // --------------------------------------------------------------------------
@@ -217,6 +295,9 @@ function connect(meetingId) {
       /* already closed */
     }
   }
+  // Buffered audio belongs to the meeting it was captured for.
+  if (state.wsMeetingId !== meetingId) clearPendingAudio();
+  state.wsMeetingId = meetingId;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = proto + '//' + location.host + '/ws?meeting=' + encodeURIComponent(meetingId);
   const ws = new WebSocket(url);
@@ -226,6 +307,7 @@ function connect(meetingId) {
   ws.onopen = () => {
     if (state.ws !== ws) return;
     state.retry = 0;
+    flushPendingAudio();
     els.connState.dataset.state = 'on';
     els.connState.textContent = t('已连接');
   };
@@ -238,6 +320,13 @@ function connect(meetingId) {
     if (state.recording && state.retry < 6) {
       state.retry += 1;
       setTimeout(() => connect(meetingId), 800 * state.retry);
+    } else if (state.recording) {
+      // The server stops an abandoned recording shortly after this; keep the
+      // UI honest instead of pretending the capture is still being saved.
+      clearPendingAudio();
+      stopCapture();
+      applyState('stopped');
+      showBanner(t('与本机服务的连接已断开，录音已停止。断开前的内容已保存，可在历史记录中查看。'), 'error');
     }
   };
 
@@ -263,11 +352,50 @@ function send(obj) {
   if (state.ws && state.ws.readyState === 1) state.ws.send(JSON.stringify(obj));
 }
 
+// About five minutes of 16 kHz mono Int16 audio.
+const MAX_PENDING_AUDIO_BYTES = 16000 * 2 * 300;
+
+function flushPendingAudio() {
+  const ws = state.ws;
+  if (!ws || ws.readyState !== WebSocket.OPEN || !state.pendingAudio.length) return;
+  for (const buffer of state.pendingAudio.splice(0)) ws.send(buffer);
+  state.pendingAudioBytes = 0;
+  if (state.droppedAudioBytes) {
+    const seconds = Math.round(state.droppedAudioBytes / 32000);
+    showBanner(t('连接中断时间过长，约 ') + seconds + t(' 秒录音未能保存'), 'warn');
+    state.droppedAudioBytes = 0;
+  }
+}
+
+/** Send one captured PCM frame, buffering it while the socket reconnects. */
+function sendAudio(buffer) {
+  if (!state.recording) return;
+  const ws = state.ws;
+  if (ws?.readyState === WebSocket.OPEN) {
+    if (state.pendingAudio.length) flushPendingAudio();
+    ws.send(buffer);
+    return;
+  }
+  state.pendingAudio.push(buffer);
+  state.pendingAudioBytes += buffer.byteLength;
+  while (state.pendingAudioBytes > MAX_PENDING_AUDIO_BYTES && state.pendingAudio.length) {
+    const dropped = state.pendingAudio.shift();
+    state.pendingAudioBytes -= dropped.byteLength;
+    state.droppedAudioBytes += dropped.byteLength;
+  }
+}
+
+function clearPendingAudio() {
+  state.pendingAudio = [];
+  state.pendingAudioBytes = 0;
+  state.droppedAudioBytes = 0;
+}
+
 async function createMeeting(opts) {
   const res = await fetch('/api/meetings', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(opts || {}),
+    body: JSON.stringify({ mode: els.noteMode.value, notesDetail: els.notesDetail.value, ...(opts || {}) }),
   });
   const json = await res.json();
   if (json.error) throw new Error(json.error);
@@ -302,8 +430,14 @@ function handleEvent(evt) {
     case 'segment-update': {
       const seg = state.segments.find((s) => s.index === evt.index);
       if (seg) {
-        seg.translation = evt.translation;
+        // Updates carry either a translation or a sentence that grew.
+        if ('translation' in evt) seg.translation = evt.translation;
+        if ('text' in evt) seg.text = evt.text;
+        if ('end' in evt) seg.end = evt.end;
+        if ('open' in evt) seg.open = evt.open;
+        if ('speaker' in evt) seg.speaker = evt.speaker;
         updateSegmentElement(seg);
+        if ('speaker' in evt) renderSpeakers(state.meeting?.speakers);
       }
       break;
     }
@@ -313,7 +447,8 @@ function handleEvent(evt) {
       break;
 
     case 'summary':
-      els.summaryBody.innerHTML = renderMarkdown(evt.summary);
+      if (state.meeting) { state.meeting.summary = evt.summary; state.meeting.summaryMode = evt.summaryMode; }
+      renderSummary(evt.summary);
       els.summaryMeta.textContent = '已更新 · ' + new Date().toLocaleTimeString('zh-CN');
       break;
 
@@ -321,8 +456,16 @@ function handleEvent(evt) {
       els.summaryMeta.textContent = '正在总结…';
       break;
 
+    case 'minutes-pending':
+      state.minutesPending = true;
+      els.minutesMeta.textContent = t('正在生成…');
+      renderNextStep();
+      break;
+
     case 'minutes':
+      state.minutesPending = false;
       renderMinutes(evt.minutes);
+      renderNextStep();
       // Native toast when the shell has our attention elsewhere.
       if (desktop) desktop.notify('巴别回声 · 纪要已生成', els.title.value || '会议纪要');
       break;
@@ -332,19 +475,41 @@ function handleEvent(evt) {
       break;
 
     case 'speakers':
+      if (state.meeting) {
+        state.meeting.speakers = evt.speakers;
+        if ('speakerBackup' in evt) state.meeting.speakerBackup = evt.speakerBackup;
+      }
       renderSpeakers(evt.speakers);
+      updateDiarizeButtons();
+      break;
+
+    case 'diarize-pending':
+      showBanner(t('正在用整段录音校正说话人…'));
+      break;
+
+    case 'diarize-done':
+      showBanner(t('说话人已校正') + '：' + evt.speakers + ' ' + t('位说话人') + ' · ' + evt.changed + ' ' + t('段有变化'));
       break;
 
     case 'meta':
       if (evt.title) els.title.value = evt.title;
+      if (state.meeting) Object.assign(state.meeting, evt);
+      if (evt.mode) els.noteMode.value = evt.mode;
+      if (evt.notesDetail) els.notesDetail.value = evt.notesDetail;
+      updateNoteLabels();
       break;
 
-    case 'status':
+    case 'status': {
+      const was = state.meeting?.state;
       applyState(evt.state);
+      // A recording or import that just ended offers what to do next.
+      if (evt.state === 'stopped' && ['recording', 'paused', 'processing'].includes(was)) showNextStep();
+      else renderNextStep();
       if (evt.state === 'stopped' && state.importDone !== null) {
         els.levelHint.textContent = '导入完成，共 ' + state.importDone + ' 条';
       }
       break;
+    }
 
     case 'level':
       pushLevel(evt.rms);
@@ -363,6 +528,8 @@ function handleEvent(evt) {
 
     case 'audio':
       if (evt.audio && state.meeting) {
+        state.meeting.audio = evt.audio;
+        updateDiarizeButtons();
         els.playerWrap.hidden = false;
         els.player.src = '/api/meetings/' + state.meeting.id + '/audio?v=' + Date.now();
       }
@@ -374,6 +541,12 @@ function handleEvent(evt) {
 
     case 'error':
       showBanner(evt.message, evt.fatal ? 'error' : 'warn');
+      if (evt.minutes && state.minutesPending) {
+        // A failed minutes run leaves them retryable from the card.
+        state.minutesPending = false;
+        els.minutesMeta.textContent = t('尚未生成');
+        renderNextStep();
+      }
       if (evt.fatal) {
         stopCapture();
         applyState('stopped');
@@ -388,19 +561,26 @@ function handleEvent(evt) {
 function applyMeeting(m) {
   state.meeting = m;
   state.importDone = null;
+  state.minutesPending = false;
+  closeSpeakerMenu();
   state.segments = m.segments || [];
   els.title.value = m.title || t(DEFAULT_TITLE);
   els.language.value = m.language || 'auto';
+  els.noteMode.value = m.mode || 'meeting';
+  els.notesDetail.value = m.notesDetail || 'detailed';
+  updateNoteLabels();
   els.translateTo.value = m.translateTo || '';
   state.recording = false;
   state.startedAt = 0;
   state.elapsedBase = m.durationMs || 0;
   applyState(m.state);
   renderAllSegments();
+  cancelMarkdownRender(els.summaryBody);
+  state.summaryText = m.summary || '';
   els.summaryBody.innerHTML = '<p class="muted">会议开始后，摘要会每隔一段时间自动刷新。</p>';
   els.summaryMeta.textContent = '尚未生成';
   if (m.summary) {
-    els.summaryBody.innerHTML = renderMarkdown(m.summary);
+    renderSummary(m.summary);
     els.summaryMeta.textContent = '已恢复';
   }
   els.minutesBody.innerHTML = '<p class="muted">结束录音时会自动生成结构化纪要，也可以随时手动生成。</p>';
@@ -411,7 +591,9 @@ function applyMeeting(m) {
     els.qaLog.innerHTML = '';
     for (const q of m.qa) renderAnswer(q);
   }
+  updateNoteLabels();
   renderSpeakers(m.speakers);
+  updateDiarizeButtons();
   renderStats(m.stats);
   if (m.audio) {
     els.playerWrap.hidden = false;
@@ -475,6 +657,7 @@ function applyState(s) {
   state.startedAt = state.recording ? Date.now() : 0;
   if (state.recording && wasPaused) state.lastAudibleAt = Date.now();
   if (s === 'stopped' && state.stream && !state.testingMic) stopCapture();
+  if (s === 'stopped') clearPendingAudio();
 
   els.btnRecord.disabled = state.recording || state.paused || s === 'processing';
   els.btnPause.disabled = !(state.recording || state.paused);
@@ -488,6 +671,7 @@ function applyState(s) {
   els.timer.textContent = fmtClock(tickBase());
   // Tells the shell to hold a wake lock and flag the tray as recording.
   if (desktop) desktop.setRecording(state.recording);
+  updateDiarizeButtons();
 }
 
 function tickBase() {
@@ -510,11 +694,16 @@ function buildSegmentEl(seg) {
   const spk = h('div', {
     class: 'seg-speaker',
     text: seg.speaker || t('说话人'),
-    title: '点击重命名说话人',
-    onclick: () => renameSpeaker(seg.speaker),
+    title: t('点击更改说话人'),
+    role: 'button',
+    tabIndex: 0,
+    onclick: (e) => openSpeakerMenu(seg.index, e.currentTarget),
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSpeakerMenu(seg.index, e.currentTarget); } },
   });
   const body = h('div', { class: 'seg-body' }, h('div', { class: 'seg-text', text: seg.text }));
   const el = h('div', { class: 'seg', dataset: { index: seg.index } }, time, spk, body);
+  // An unfinished sentence may still grow; it is translated once complete.
+  el.classList.toggle('open', !!seg.open);
   return el;
 }
 
@@ -530,6 +719,8 @@ function updateSegmentElement(seg) {
   const el = state.segmentEls.get(seg.index);
   if (!el) return;
   const body = el.querySelector('.seg-body');
+  body.querySelector('.seg-text').textContent = seg.text;
+  el.classList.toggle('open', !!seg.open);
   const existing = body.querySelector('.seg-tr');
   if (seg.translation) {
     if (existing) existing.textContent = seg.translation;
@@ -605,15 +796,70 @@ function seek(ms) {
   els.player.play().catch(() => {});
 }
 
-async function renameSpeaker(from) {
-  const to = prompt('把这个说话人改成什么名字？', from === '说话人1' ? '' : from);
-  if (!to || to === from) return;
+function speakerNamesInUse() {
+  const names = new Map();
+  for (const seg of state.segments) if (seg.speaker) names.set(seg.speaker, (names.get(seg.speaker) || 0) + 1);
+  for (const s of Object.values(state.meeting?.speakers || {})) if (!names.has(s.name)) names.set(s.name, 0);
+  return names;
+}
+
+function closeSpeakerMenu() {
+  state.speakerMenu?.remove();
+  state.speakerMenu = null;
+}
+
+/**
+ * One sentence's speaker: move it to another speaker, a new one, or rename
+ * this speaker everywhere (renaming to an existing name merges the two).
+ * Inline rather than prompt(), which Electron does not implement.
+ */
+function openSpeakerMenu(index, anchor) {
+  closeSpeakerMenu();
+  const seg = state.segments.find((s) => s.index === index);
+  if (!seg) return;
+  const names = speakerNamesInUse();
+  const current = seg.speaker || '';
+  const setSpeaker = (name) => {
+    closeSpeakerMenu();
+    if (name && name !== current) send({ type: 'set-segment-speaker', index, speaker: name });
+  };
+  const fresh = h('input', { placeholder: t('新说话人名字'), maxLength: 60,
+    onkeydown: (e) => { if (e.key === 'Enter') setSpeaker(fresh.value.trim()); } });
+  const rename = h('input', { value: current, maxLength: 60, 'aria-label': t('重命名'),
+    onkeydown: (e) => { if (e.key === 'Enter') renameAll(); } });
+  const renameAll = () => {
+    const to = rename.value.trim();
+    closeSpeakerMenu();
+    if (!to || to === current) return;
+    if (names.has(to) && !confirm(t('已有同名说话人，两者会合并。继续吗？'))) return;
+    send({ type: 'rename-speaker', from: current, to });
+  };
+  const menu = h('div', { class: 'speaker-menu', role: 'dialog', 'aria-label': t('更改说话人') },
+    h('div', { class: 'speaker-menu-title', text: t('这句话的说话人') }),
+    h('div', { class: 'speaker-menu-list' }, ...[...names.keys()].map((name) => h('button', {
+      type: 'button', class: 'btn tiny' + (name === current ? ' primary' : ''), text: name,
+      'aria-pressed': String(name === current), onclick: () => setSpeaker(name) }))),
+    h('div', { class: 'speaker-menu-row' }, fresh,
+      h('button', { type: 'button', class: 'btn tiny', text: t('设为新说话人'), onclick: () => setSpeaker(fresh.value.trim()) })),
+    current ? h('div', { class: 'speaker-menu-title', text: t('重命名「') + current + t('」（共 ') + (names.get(current) || 0) + t(' 句）') }) : null,
+    current ? h('div', { class: 'speaker-menu-row' }, rename,
+      h('button', { type: 'button', class: 'btn tiny primary', text: t('全部改名'), onclick: renameAll })) : null);
+  document.body.append(menu);
+  const box = anchor.getBoundingClientRect();
+  const width = Math.min(300, window.innerWidth - 16);
+  menu.style.width = width + 'px';
+  menu.style.left = Math.max(8, Math.min(box.left, window.innerWidth - width - 8)) + 'px';
+  const below = box.bottom + 6;
+  menu.style.top = (below + menu.offsetHeight > window.innerHeight ? Math.max(8, box.top - menu.offsetHeight - 6) : below) + 'px';
+  state.speakerMenu = menu;
+  menu.querySelector('button')?.focus();
+}
+
+function renameSpeaker(from, to) {
+  to = String(to || '').trim();
+  if (!from || !to || to === from) return;
+  if (speakerNamesInUse().has(to) && !confirm(t('已有同名说话人，两者会合并。继续吗？'))) return renderSpeakers(state.meeting?.speakers);
   send({ type: 'rename-speaker', from, to });
-  for (const seg of state.segments) if (seg.speaker === from) seg.speaker = to;
-  for (const [, el] of state.segmentEls) {
-    const chip = el.querySelector('.seg-speaker');
-    if (chip && chip.textContent === from) chip.textContent = to;
-  }
 }
 
 // --------------------------------------------------------------------------
@@ -622,9 +868,25 @@ async function renameSpeaker(from) {
 
 function renderMinutes(m) {
   if (!m) return;
+  if (state.meeting) state.meeting.minutes = m;
   const wrap = h('div', { class: 'minutes' });
   if (m.title) wrap.append(h('h4', { text: m.title }));
   if (m.abstract) wrap.append(h('p', { class: 'abstract', text: m.abstract }));
+  for (const topic of Array.isArray(m.topics) ? m.topics : []) {
+    if (!topic || typeof topic !== 'object') continue;
+    wrap.append(h('h4', { text: topic.title || t('内容详解') }));
+    if (topic.detail) wrap.append(h('p', { text: topic.detail }));
+    if (Array.isArray(topic.points)) wrap.append(h('ul', null, topic.points.map((p) => h('li', { text: String(p) }))));
+  }
+  for (const [key, heading, name, detail] of [
+    ['keyConcepts', '核心概念与公式', 'term', 'explanation'],
+    ['examples', '例题与案例', 'title', 'explanation'],
+    ['reviewQuestions', '复习问答', 'question', 'answer'],
+  ]) {
+    if (!Array.isArray(m[key]) || !m[key].length) continue;
+    wrap.append(h('h4', { text: t(heading) }));
+    for (const item of m[key]) if (item && typeof item === 'object') wrap.append(h('p', null, h('strong', { text: item[name] || '' }), h('br'), document.createTextNode(item[detail] || '')));
+  }
   if (Array.isArray(m.participants) && m.participants.length) {
     wrap.append(h('h4', { text: t('参与人') }));
     wrap.append(h('div', { class: 'kw' }, m.participants.map((p) => h('span', { text: String(p) }))));
@@ -687,6 +949,7 @@ function renderMinutes(m) {
   }
   els.minutesBody.replaceChildren(wrap);
   els.minutesMeta.textContent = t('生成于') + ' ' + new Date(m.generatedAt || Date.now()).toLocaleTimeString(state.uiLanguage === 'zh' ? 'zh-CN' : state.uiLanguage) + ' · ' + (m.model || '');
+  updateNoteLabels();
 }
 
 function renderAnswer(entry) {
@@ -700,21 +963,53 @@ function renderAnswer(entry) {
   els.qaLog.scrollTop = els.qaLog.scrollHeight;
 }
 
+/** Whole-recording correction needs a finished meeting with saved audio. */
+function updateDiarizeButtons() {
+  const m = state.meeting;
+  const finished = !!m && !state.recording && !state.paused && els.statePill.dataset.state === 'stopped';
+  els.btnDiarize.hidden = !(finished && m.audio && state.segments.length);
+  els.btnUndoDiarize.hidden = !(finished && m.speakerBackup);
+}
+
+async function diarizeSpeakers() {
+  const m = state.meeting;
+  if (!m) return;
+  let provider = null;
+  try {
+    const config = await (await fetch('/api/config')).json();
+    provider = config.asr?.providers?.[config.speakers?.provider || 'deepgram'];
+  } catch { /* the server reports a missing engine itself */ }
+  const hours = (m.durationMs || 0) / 3600000;
+  const cost = provider?.pricePerHour ? ' ≈ ' + (Math.ceil(hours * provider.pricePerHour * 100) / 100) + ' ' + (provider.currency || '') : '';
+  const question = t('将把整段录音发送给 Deepgram 重新区分说话人，按音频时长计费一次') + cost + '。' +
+    t('转写文字和翻译不变，可以撤销。继续吗？');
+  if (!confirm(question)) return;
+  send({ type: 'diarize-speakers' });
+}
+
 function renderSpeakers(speakers) {
   const entries = Object.values(speakers || {});
   if (!entries.length) {
     els.speakerList.replaceChildren(h('p', { class: 'muted small', text: t('还没有识别出说话人。') }));
     return;
   }
+  const counts = speakerNamesInUse();
+  const names = [...new Set(entries.map((s) => s.name))];
   els.speakerList.replaceChildren(
-    ...entries.map((s) =>
+    ...names.map((name) =>
       h(
         'div',
         { class: 'speaker-row' },
         h('input', {
-          value: s.name,
-          onchange: (e) => send({ type: 'rename-speaker', from: s.name, to: e.target.value.trim() || s.name }),
+          value: name, maxLength: 60, 'aria-label': t('重命名') + ' ' + name,
+          onchange: (e) => renameSpeaker(name, e.target.value),
         }),
+        h('span', { class: 'muted small', text: (counts.get(name) || 0) + ' ' + t('句') }),
+        names.length > 1 ? h('select', { 'aria-label': t('合并到'), onchange: (e) => {
+          if (e.target.value) renameSpeaker(name, e.target.value);
+          e.target.value = '';
+        } }, h('option', { value: '', text: t('合并到…') }),
+        ...names.filter((other) => other !== name).map((other) => h('option', { value: other, text: other }))) : null,
       ),
     ),
   );
@@ -751,9 +1046,27 @@ function refreshStats(stats) {
 }
 
 function updateExportLinks(id) {
+  els.exportEmpty.hidden = !!id;
+  els.exportMenu.querySelector('.export-option').hidden = !id;
   document.querySelectorAll('[data-export]').forEach((a) => {
+    a.hidden = !id;
+    if (!id) return a.removeAttribute('href');
     a.href = '/api/meetings/' + id + '/export?format=' + a.dataset.export;
+    if (a.dataset.export === 'md') a.href += '&includeTranscript=' + (els.includeTranscript.checked ? '1' : '0');
   });
+}
+
+function updateNoteLabels() {
+  const classroom = els.noteMode.value === 'class';
+  document.querySelector('[data-tab="minutes"]').textContent = t(classroom ? '课程笔记' : '智能纪要');
+  document.querySelector('[data-tab="summary"]').textContent = t(classroom ? '课堂摘要' : '实时摘要');
+  const summaryChanged = state.meeting?.summary && (state.meeting.summaryMode || 'meeting') !== els.noteMode.value;
+  if (summaryChanged) { els.summaryMeta.textContent = t('场景已切换，请重新总结'); els.summaryMeta.dataset.contextWarning = '1'; }
+  else if (els.summaryMeta.dataset.contextWarning) { delete els.summaryMeta.dataset.contextWarning; els.summaryMeta.textContent = t('已恢复'); }
+  const minutes = state.meeting?.minutes;
+  const minutesChanged = minutes && ((minutes.mode || 'meeting') !== els.noteMode.value || (minutes.notesDetail || 'standard') !== els.notesDetail.value);
+  if (minutesChanged) { els.minutesMeta.textContent = t('选项已改变，请重新生成纪要'); els.minutesMeta.dataset.contextWarning = '1'; }
+  else if (els.minutesMeta.dataset.contextWarning) { delete els.minutesMeta.dataset.contextWarning; els.minutesMeta.textContent = t('已恢复'); }
 }
 
 // --------------------------------------------------------------------------
@@ -939,7 +1252,7 @@ async function startCapture(deviceId = els.microphone.value) {
       node.port.onmessage = (e) => {
         if (state.stream !== next.stream) return;
         const frame = e.data;
-        if (state.recording && state.ws?.readyState === WebSocket.OPEN) state.ws.send(frame.buffer);
+        sendAudio(frame.buffer);
         let sum = 0;
         for (let i = 0; i < frame.length; i += 4) {
           const v = frame[i] / 32768;
@@ -970,7 +1283,7 @@ async function startCapture(deviceId = els.microphone.value) {
             const s = state.paused ? 0 : Math.max(-1, Math.min(1, merged[off + i]));
             out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
           }
-          if (state.recording && state.ws?.readyState === WebSocket.OPEN) state.ws.send(out.buffer);
+          sendAudio(out.buffer);
           let power = 0;
           for (let i = 0; i < out.length; i += 4) power += (out[i] / 32768) ** 2;
           pushLevel(Math.sqrt(power / (out.length / 4)));
@@ -1100,10 +1413,10 @@ async function onRecord() {
 }
 
 async function onStop() {
-  send({ type: 'stop' });
+  send({ type: 'stop', minutes: els.autoMinutes.checked });
   stopCapture();
   els.btnStop.disabled = true;
-  // The server renders minutes on stop; give it a moment then refresh stats.
+  // Give the server a moment to finish, then refresh stats.
   setTimeout(() => {
     send({ type: 'stats' });
   }, 1500);
@@ -1208,6 +1521,24 @@ function onUpload(file) {
 }
 
 function bindControls() {
+  els.includeTranscript.onchange = () => {
+    try { localStorage.setItem('babel-md-include-transcript', String(els.includeTranscript.checked)); } catch { /* In memory. */ }
+    if (state.meeting) updateExportLinks(state.meeting.id);
+  };
+  for (const control of [els.noteMode, els.notesDetail]) control.onchange = () => {
+    if (state.meeting && state.ws?.readyState !== WebSocket.OPEN) {
+      els.noteMode.value = state.meeting.mode || 'meeting';
+      els.notesDetail.value = state.meeting.notesDetail || 'detailed';
+      return showBanner(t('连接断开，请重连后再切换'), 'warn');
+    }
+    const options = { mode: els.noteMode.value, notesDetail: els.notesDetail.value };
+    try { localStorage.setItem('babel-note-options-v1', JSON.stringify(options)); } catch { /* In memory. */ }
+    if (state.meeting) {
+      send({ type: 'config-patch', ...options });
+      showBanner(t('已切换整理选项；已有内容保留，请手动重新生成摘要或纪要。'));
+    }
+    updateNoteLabels();
+  };
   els.uiLanguage.onchange = () => {
     state.uiLanguage = els.uiLanguage.value;
     localStorage.setItem('miaoji-ui-language', state.uiLanguage);
@@ -1280,10 +1611,10 @@ function bindControls() {
   els.translateTo.onchange = () => send({ type: 'config-patch', translateTo: els.translateTo.value });
 
   els.btnResummarize.onclick = () => send({ type: 'summarize' });
-  els.btnMinutes.onclick = () => {
-    els.minutesMeta.textContent = '正在生成…';
-    send({ type: 'minutes' });
-  };
+  els.btnReader.onclick = () => openReader();
+  els.btnReadSummary.onclick = () => openReader('summary');
+  els.btnReadMinutes.onclick = () => openReader('full');
+  els.btnMinutes.onclick = () => requestMinutes();
   const resplit = () => {
     if (!state.segments.length) return showBanner('还没有转写内容。', 'warn');
     showBanner('正在用语言线索推断说话人…');
@@ -1291,6 +1622,11 @@ function bindControls() {
   };
   els.btnResplit.onclick = resplit;
   $('#btnResplitHead').onclick = resplit;
+  els.btnDiarize.onclick = diarizeSpeakers;
+  els.btnUndoDiarize.onclick = () => {
+    if (!confirm(t('恢复校正前的说话人标注？'))) return;
+    send({ type: 'undo-diarize' });
+  };
 
   els.qaForm.onsubmit = (e) => {
     e.preventDefault();
@@ -1321,14 +1657,28 @@ function bindControls() {
   });
 
   // theme
-  const savedTheme = localStorage.getItem('miaoji-theme');
-  if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-  els.btnTheme.onclick = () => {
-    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem('miaoji-theme', next);
-    drawMeter();
+  // Light/dark lives in Settings → Appearance; the top bar keeps only navigation.
+  els.btnMoreOptions.onclick = () => {
+    const open = els.moreOptions.hidden;
+    els.moreOptions.hidden = !open;
+    els.btnMoreOptions.setAttribute('aria-expanded', String(open));
   };
+  els.autoMinutes.onchange = () => {
+    try { localStorage.setItem('babel-auto-minutes', String(els.autoMinutes.checked)); } catch { /* In memory. */ }
+  };
+  // The export menu closes on a choice, an outside click or Escape.
+  els.exportMenu.addEventListener('click', (e) => { if (e.target.closest('a[data-export]')) els.exportMenu.open = false; });
+  document.addEventListener('mousedown', (e) => {
+    if (els.exportMenu.open && !els.exportMenu.contains(e.target)) els.exportMenu.open = false;
+    if (state.speakerMenu && !state.speakerMenu.contains(e.target) && !e.target.closest('.seg-speaker')) closeSpeakerMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (els.exportMenu.open) els.exportMenu.open = false;
+    closeSpeakerMenu();
+  });
+  els.transcript.addEventListener('scroll', () => closeSpeakerMenu(), { passive: true });
+  window.addEventListener('appearancechange', () => drawMeter());
 
   els.btnHistory.onclick = () => (els.drawer.hidden ? openHistory() : closeDrawer());
   els.btnSettings.onclick = () => (els.drawer.hidden ? openSettings() : closeDrawer());
@@ -1432,61 +1782,246 @@ async function startNewMeeting() {
   showBanner('已新建会议，点击「开始录音」。');
 }
 
-async function openSettings() {
-  const body = openDrawer(t('设置'));
-  els.drawer.dataset.view = 'settings';
+const SETTINGS_TABS = [['quick', '快速设置'], ['advanced', '高级设置'], ['appearance', '外观']];
+const SETTINGS_TAB_KEY = 'babel-settings-tab';
+const LANGUAGE_LABELS = { zh: '中文', en: '英文', ja: '日本語', ko: '韩语', fr: '法语', de: '德语', es: '西班牙语', auto: '自动检测' };
+const TASK_LABELS = { summary: '摘要', minutes: '纪要', translate: '翻译', ask: '问答' };
+
+function settingsTab(requested) {
+  const known = (tab) => SETTINGS_TABS.some(([id]) => id === tab);
+  if (known(requested)) {
+    try { localStorage.setItem(SETTINGS_TAB_KEY, requested); } catch { /* per-session only */ }
+    return requested;
+  }
+  try {
+    const saved = localStorage.getItem(SETTINGS_TAB_KEY);
+    if (known(saved)) return saved;
+  } catch { /* storage unavailable */ }
+  return 'quick';
+}
+
+async function openSettings(requestedTab) {
+  const tab = settingsTab(requestedTab);
   const boot = await (await fetch('/api/bootstrap?lite=1')).json();
   const s = boot.status;
   state.status = s;
   const catalog = new Map();
+  const body = openDrawer(t('设置'));
+  els.drawer.dataset.view = 'settings';
+  els.drawer.dataset.settingsTab = tab;
+  if (requestedTab) body.scrollTop = 0;
 
-  body.append(
+  const tabs = h('div', { class: 'settings-tabs', role: 'tablist', 'aria-label': t('设置') },
+    ...SETTINGS_TABS.map(([id, label]) => h('button', { type: 'button', role: 'tab', class: 'settings-tab', 'data-tab': id,
+      'aria-selected': String(id === tab), text: t(label), onclick: () => { if (id !== tab) openSettings(id); } })));
+  body.append(tabs, tab === 'appearance' ? appearanceSettings(h, t)
+    : tab === 'advanced' ? advancedSettings(s, catalog) : quickSettings(s, catalog));
+}
+
+// --- quick settings: pick a service, paste a key, done --------------------
+
+const QUICK_NOTES = {
+  'asr:mimo': '适合中文和英文会议',
+  'asr:groq': '适合日语和多语言，价格最低',
+  'asr:deepgram': '能区分说话人，也用于整场说话人校正',
+  'asr:local': '免费离线，需要先在本机启动 whisper.cpp 服务',
+  'llm:deepseek': '推荐：摘要、纪要、翻译和问答',
+  'llm:mimo': '与小米语音识别共用同一个密钥',
+  'llm:local': '免费离线，需要先启动 Ollama 或 LM Studio',
+};
+
+function priceLabel(p) {
+  if (!p.pricePerHour) return '';
+  return '≈ ' + (p.currency === 'CNY' ? '¥' : '$') + p.pricePerHour + '/h';
+}
+
+function quickSettings(s, catalog) {
+  const language = els.language.value || 'auto';
+  const overall = setupState(s, language);
+  const asrUse = new Map();
+  for (const lang of ['zh', 'en', 'ja']) {
+    const p = effectiveAsr(s, lang);
+    if (p) asrUse.set(p.name, [...(asrUse.get(p.name) || []), t(LANGUAGE_LABELS[lang])]);
+  }
+  const llmUse = new Map();
+  for (const task of TASKS) {
+    const name = s.roles[task]?.provider;
+    if (!overall.problems.includes(task)) llmUse.set(name, [...(llmUse.get(name) || []), t(TASK_LABELS[task])]);
+  }
+  const overview = h('div', { class: 'quick-overview', 'data-level': overall.level, role: 'status' },
+    h('strong', { text: t(overall.message) }),
+    h('dl', {},
+      ...['zh', 'en', 'ja'].flatMap((lang) => [h('dt', { text: t(LANGUAGE_LABELS[lang]) }),
+        h('dd', { text: effectiveAsr(s, lang)?.label || t('未配置') })]),
+      h('dt', { text: t('文本任务') }),
+      h('dd', { text: overall.problems.length
+        ? t('不可用：') + overall.problems.map((task) => t(TASK_LABELS[task])).join(t('、'))
+        : s.llm.find((p) => p.name === s.roles.summary.provider)?.label || '' })));
+
+  return h('div', { class: 'quick-settings' },
+    overview,
+    h('section', { class: 'settings-section' },
+      h('div', { class: 'settings-section-head' }, h('h4', { text: t('1. 语音识别') }), h('span', { text: t('至少配置一个') })),
+      h('p', { class: 'settings-note', text: t('粘贴 API Key 后自动启用，并按语言自动选择引擎。') }),
+      ...s.asr.map((p) => quickProviderCard('asr', p, s, catalog, asrUse.get(p.name)))),
+    h('section', { class: 'settings-section' },
+      h('div', { class: 'settings-section-head' }, h('h4', { text: t('2. 文本模型') }), h('span', { text: t('摘要 · 纪要 · 翻译 · 问答') })),
+      ...s.llm.map((p) => quickProviderCard('llm', p, s, catalog, llmUse.get(p.name)))),
+    quickSpeakers(s),
+    h('div', { class: 'quick-footer' },
+      h('span', { text: t('密钥保存在本机，不会显示原文。') + ' ' + t('需要自定义接口、调整识别节奏或给每个任务单独选模型？') }),
+      h('button', { type: 'button', class: 'btn tiny', text: t('打开高级设置'), onclick: () => openSettings('advanced') })));
+}
+
+/** After a provider changes, keep routes and task models pointing at something that works. */
+async function settleProviders(category, provider, result) {
+  const status = result?.status;
+  if (!status) return result;
+  if (category === 'asr') {
+    const routes = routeRepairs(status);
+    if (Object.keys(routes).length) result = await patchConfig({ asr: { routes } });
+  } else if (isDeepSeekProvider(provider) && taskProblems(status).length) {
+    const fresh = status.llm.find((p) => p.name === provider.name);
+    if (fresh?.enabled && fresh.ready) result = await patchConfig({ llm: { roles: rolesFor(provider.name, '', true) } });
+  }
+  return result;
+}
+
+function quickProviderCard(category, p, s, catalog, usedFor) {
+  const card = h('div', { class: 'quick-card setting-card', 'data-provider': category + ':' + p.name });
+  const status = !p.enabled ? ['off', '未启用'] : p.ready ? ['ok', '已就绪'] : ['miss', '需要密钥'];
+  const note = h('small', { class: 'settings-note quick-result', role: 'status' });
+  const enable = (on) => settingsAction(async () =>
+    settleProviders(category, p, await patchConfig({ [category]: { providers: { [p.name]: { enabled: on } } } })), on ? '已启用' : '已停用');
+  const key = h('input', { type: 'password', placeholder: t('粘贴 API Key'), autocomplete: 'new-password', spellcheck: false,
+    'aria-label': p.label + ' API Key', onkeydown: (e) => { if (e.key === 'Enter') saveKey(); } });
+  const saveKey = () => {
+    if (!key.value.trim()) return showBanner(t('请先粘贴 API Key。'), 'warn');
+    settingsAction(async () => {
+      await setCredential(p.keyRef, key.value.trim());
+      return settleProviders(category, p, await patchConfig({ [category]: { providers: { [p.name]: { enabled: true } } } }));
+    }, '已保存并启用');
+  };
+  const keyRow = h('div', { class: 'key-row', hidden: p.noAuth || p.hasKey }, key,
+    h('button', { type: 'button', class: 'btn tiny primary', text: t('保存并启用'), onclick: saveKey }));
+  const test = async () => {
+    note.textContent = t('连接中…');
+    delete note.dataset.state;
+    try {
+      const res = await fetch('/api/providers/' + category + '/' + encodeURIComponent(p.name) + '/models');
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
+      note.textContent = t('连接成功') + ' · ' + (data.models || []).length + ' ' + t('个模型');
+      note.dataset.state = 'ok';
+      if (data.models?.length) catalog.set(category + ':' + p.name + ':' + p.baseUrl, Promise.resolve(data.models));
+    } catch (err) {
+      note.textContent = err.message + ' — ' + t('部分服务不提供模型列表，失败不一定代表密钥无效。');
+      note.dataset.state = 'error';
+    }
+  };
+  const actions = h('div', { class: 'settings-actions' },
+    p.enabled ? null : (p.ready ? h('button', { type: 'button', class: 'btn tiny primary', text: t('启用'), onclick: () => enable(true) }) : null),
+    p.ready ? h('button', { type: 'button', class: 'btn tiny', text: t('测试连接'), onclick: test }) : null,
+    p.hasKey ? h('button', { type: 'button', class: 'btn tiny', text: t('更换密钥'), onclick: () => { keyRow.hidden = false; key.focus(); } }) : null,
+    p.enabled ? h('button', { type: 'button', class: 'btn tiny ghost', text: t('停用'), onclick: () => enable(false) }) : null);
+
+  card.append(
+    h('div', { class: 'quick-card-head' },
+      h('div', { class: 'provider-heading' },
+        h('strong', { text: p.label }),
+        h('small', { text: [t(QUICK_NOTES[category + ':' + p.name] || (p.custom ? '自定义引擎' : '')), priceLabel(p)].filter(Boolean).join(' · ') })),
+      h('span', { class: 'badge ' + status[0], text: t(status[1]) })),
+    ...(usedFor?.length ? [h('div', { class: 'quick-used', text: t('用于：') + usedFor.join(t('、')) })] : []),
+    keyRow, actions, note);
+
+  // A ready text service the tasks are not using can take all of them at once.
+  const tasksElsewhere = TASKS.some((task) => s.roles[task]?.provider !== p.name);
+  if (category === 'llm' && p.enabled && p.ready && tasksElsewhere) {
+    const deepseek = isDeepSeekProvider(p);
+    const picker = deepseek ? null : modelPicker('llm', p, '', catalog);
+    const chooser = h('div', { class: 'quick-model', hidden: true },
+      picker ? settingsField('选择模型', picker.element) : null,
+      h('button', { type: 'button', class: 'btn tiny primary', text: t('确认'), onclick: () => {
+        if (!picker.value()) return showBanner(t('输入模型 ID'), 'warn');
+        settingsAction(() => patchConfig({ llm: { roles: rolesFor(p.name, picker.value()) } }), '设置已保存');
+      } }));
+    actions.prepend(h('button', { type: 'button', class: 'btn tiny', text: t('所有任务改用此服务'), onclick: () => {
+      if (deepseek) return settingsAction(() => patchConfig({ llm: { roles: rolesFor(p.name, '', true) } }), '设置已保存');
+      chooser.hidden = false;
+      picker.setProvider(p);
+    } }));
+    card.append(chooser);
+  }
+  return card;
+}
+
+function quickSpeakers(s) {
+  const engine = s.asr.find((p) => p.name === (s.speakers?.provider || 'deepgram'));
+  const ready = !!engine && engine.enabled && engine.ready;
+  const auto = h('input', { type: 'checkbox', checked: !!s.speakers?.autoDiarize, disabled: !ready && !s.speakers?.autoDiarize,
+    'data-field': 'autoDiarize', onchange: (e) => settingsAction(() => patchConfig({ speakers: { autoDiarize: e.target.checked } }), '设置已保存') });
+  return h('section', { class: 'settings-section', 'data-settings': 'speakers' },
+    h('div', { class: 'settings-section-head' }, h('h4', { text: t('3. 说话人区分（可选）') }),
+      h('span', { text: t(ready ? '可用' : '需要 Deepgram 密钥') })),
+    h('div', { class: 'quick-card setting-card' },
+      h('label', { class: 'settings-check' }, auto, ' ', t('录音或导入结束后自动用整段录音校正说话人')),
+      h('small', { class: 'settings-note', text: ready
+        ? t('整段录音会再发送给 Deepgram 一次，按时长计费；可在转写区撤销。')
+        : t('先在上方配置 Deepgram 密钥（无需设为主要识别引擎）。') })));
+}
+
+// --- advanced settings: everything, grouped and collapsed -----------------
+
+function settingsGroup(id, title, meta, ...children) {
+  const key = 'group-' + id;
+  return h('details', { class: 'settings-section settings-group', 'data-settings': id, open: state.settingsOpen.has(key),
+    ontoggle: (e) => { if (e.target.open) state.settingsOpen.add(key); else state.settingsOpen.delete(key); } },
+  h('summary', { class: 'settings-section-head' }, h('h4', { text: t(title) }), meta ? h('span', { text: meta }) : null),
+  h('div', { class: 'settings-group-body' }, ...children));
+}
+
+/** Save on change without rebuilding the drawer, so focus and typing survive. */
+async function autosave(status, patch) {
+  status.textContent = t('保存中…');
+  delete status.dataset.state;
+  try {
+    const result = await patchConfig(patch);
+    if (result?.status) state.status = result.status;
+    applyStatus(state.status);
+    status.textContent = t('已自动保存');
+    status.dataset.state = 'ok';
+  } catch (err) {
+    status.textContent = err.message;
+    status.dataset.state = 'error';
+  }
+}
+
+function advancedSettings(s, catalog) {
+  const readyCount = (list) => list.filter((p) => p.enabled && p.ready).length + '/' + list.length + ' ' + t('可用');
+  return h('div', { class: 'advanced-settings' },
     h('div', { class: 'settings-intro' },
-      h('strong', { text: t('自定义引擎') }),
-      h('p', { text: t('密钥保存在本机，不会显示原文。') + ' ' + t('服务必须由你自行启动；接口地址填写到 /v1，不含具体方法名。') })),
-    realtimeSettings(s.realtime),
-    summarySettings(s.summary),
-    h('section', { class: 'settings-section' },
-      h('div', { class: 'settings-section-head' }, h('h4', { text: t('语音识别引擎') }), h('span', { text: s.asr.length + ' ASR' })),
+      h('strong', { text: t('高级设置') }),
+      h('p', { text: t('设置项会自动保存；连接设置和密钥需要点击保存。') + ' ' + t('服务必须由你自行启动；接口地址填写到 /v1，不含具体方法名。') })),
+    settingsGroup('asr', '语音识别引擎', readyCount(s.asr),
       ...s.asr.map((p) => providerCard('asr', p, catalog)),
-      customProviderForm('asr')),
-    h('section', { class: 'settings-section' },
-      h('div', { class: 'settings-section-head' }, h('h4', { text: t('按语言路由') })),
-      h('div', { class: 'route-grid' }, ...Object.entries(s.routes).flatMap(([lang, selected]) => {
-        const label = t({ zh: '中文', en: '英文', ja: '日本語', ko: '韩语', fr: '法语', de: '德语', es: '西班牙语', auto: '自动检测' }[lang] || lang);
-        const supports = (p) => lang === 'auto' || (p.kind === 'mimo'
-          ? ['zh', 'en'].includes(lang)
-          : p.languages?.includes(lang) || p.languages?.includes('auto'));
-        return [h('label', { text: label }), h('select', {
+      customProviderForm('asr'),
+      h('h5', { class: 'settings-subhead', text: t('按语言路由') }),
+      h('div', { class: 'route-grid' }, ...Object.entries(s.routes).flatMap(([lang, selected]) => [
+        h('label', { text: t(LANGUAGE_LABELS[lang] || lang) }), h('select', {
           onchange: (e) => settingsAction(() => patchConfig({ asr: { routes: { [lang]: e.target.value } } }), '设置已保存'),
         }, ...s.asr.map((p) => h('option', {
-          value: p.name, selected: p.name === selected, disabled: !supports(p),
-          text: p.label + (supports(p) ? '' : ' · ' + lang + ' ✕'),
-        })))];
-      }))),
-    h('section', { class: 'settings-section' },
-      h('div', { class: 'settings-section-head' }, h('h4', { text: t('文本模型') }), h('span', { text: s.llm.length + ' LLM' })),
+          value: p.name, selected: p.name === selected, disabled: !supportsLanguage(p, lang),
+          text: p.label + (supportsLanguage(p, lang) ? '' : ' · ' + lang + ' ✕') + (p.enabled && p.ready ? '' : ' · ' + t('不可用')),
+        })))]))),
+    settingsGroup('llm', '文本模型与任务', readyCount(s.llm),
       ...s.llm.map((p) => providerCard('llm', p, catalog)),
-      customProviderForm('llm')),
-    h('section', { class: 'settings-section' },
-      h('div', { class: 'settings-section-head' }, h('h4', { text: t('任务模型') })),
+      customProviderForm('llm'),
+      h('h5', { class: 'settings-subhead', text: t('任务模型') }),
       h('p', { class: 'settings-note', text: t('为每个任务选择服务和模型；列表不可用时可手动输入模型 ID。思考开关仅适用于 DeepSeek 官方接口。') }),
       ...Object.entries(s.roles).map(([roleName, role]) => taskModelSettings(roleName, role, s.llm, catalog))),
-    h('section', { class: 'settings-section' },
-      h('div', { class: 'settings-section-head' }, h('h4', { text: t('界面外观') })),
-      h('label', { class: 'settings-field' }, h('span', { text: t('界面外观') }),
-        h('select', { onchange: (e) => {
-          if (e.target.value === 'auto') {
-            document.documentElement.removeAttribute('data-theme');
-            localStorage.removeItem('miaoji-theme');
-          } else {
-            document.documentElement.dataset.theme = e.target.value;
-            localStorage.setItem('miaoji-theme', e.target.value);
-          }
-          drawMeter();
-        } }, ...[['auto', '跟随系统'], ['light', '浅色'], ['dark', '深色']].map(([value, label]) =>
-          h('option', { value, selected: value === (localStorage.getItem('miaoji-theme') || 'auto'), text: t(label) }))))),
-  );
+    realtimeSettings(s.realtime),
+    summarySettings(s.summary),
+    speakerSettings(s.speakers, s.asr));
 }
 
 function realtimeSettings(realtime) {
@@ -1496,23 +2031,27 @@ function realtimeSettings(realtime) {
     ['maxUtteranceMs', '最长单句（秒）', 10, 60],
     ['overlapMs', '硬切衔接音频（秒）', 0, 3],
   ];
+  const status = h('small', { class: 'settings-note autosave-state', role: 'status' });
+  const save = () => {
+    const patch = {};
+    for (const [key] of specs) {
+      const value = Number(inputs[key].value);
+      if (!Number.isFinite(value) || inputs[key].value === '' || !inputs[key].checkValidity()) {
+        status.textContent = t('请输入有效的时间数值');
+        status.dataset.state = 'error';
+        return;
+      }
+      patch[key] = Math.round(value * 1000);
+    }
+    autosave(status, { realtime: patch });
+  };
   const inputs = Object.fromEntries(specs.map(([key, label, min, max]) => [key,
     h('input', { type: 'number', min, max, step: 0.1, value: ((realtime[key] ?? 0) / 1000).toFixed(1),
-      'aria-label': t(label) })]));
-  return h('section', { class: 'settings-section' },
-    h('div', { class: 'settings-section-head' }, h('h4', { text: t('实时识别节奏') })),
+      'aria-label': t(label), onchange: save })]));
+  return settingsGroup('realtime', '实时识别节奏', null,
     h('div', { class: 'settings-grid' }, ...specs.map(([key, label]) => settingsField(label, inputs[key]))),
     h('p', { class: 'settings-note', text: t('预览按间隔更新；停顿后立即定稿。长句优先等停顿，必须硬切时用重叠音频衔接。Groq 预览最短为 10 秒。') }),
-    h('button', { class: 'btn tiny primary', text: t('保存配置'), onclick: () => {
-      const patch = {};
-      for (const [key] of specs) {
-        const value = Number(inputs[key].value);
-        if (!Number.isFinite(value) || inputs[key].value === '') return showBanner(t('请输入有效的时间数值'), 'error');
-        patch[key] = Math.round(value * 1000);
-      }
-      settingsAction(() => patchConfig({ realtime: patch }), '设置已保存');
-    } }),
-  );
+    status);
 }
 
 function summarySettings(summary = {}) {
@@ -1521,19 +2060,36 @@ function summarySettings(summary = {}) {
     ['minNewChars', '自动摘要最少新增字数', 0, 10000, summary.minNewChars ?? 200],
     ['maxChars', '摘要目标字数', 200, 3000, summary.maxChars ?? 900],
   ];
+  const status = h('small', { class: 'settings-note autosave-state', role: 'status' });
+  const save = () => {
+    if (specs.some(([key]) => !inputs[key].value || !inputs[key].checkValidity())) {
+      status.textContent = t('请输入有效的时间数值');
+      status.dataset.state = 'error';
+      return;
+    }
+    autosave(status, { summary: {
+      autoMs: Number(inputs.autoMs.value) * 1000,
+      minNewChars: Number(inputs.minNewChars.value), maxChars: Number(inputs.maxChars.value),
+    } });
+  };
   const inputs = Object.fromEntries(specs.map(([key, label, min, max, value]) =>
-    [key, h('input', { type: 'number', min, max, step: 1, value, 'data-field': key, 'aria-label': t(label) })]));
-  return h('section', { class: 'settings-section', 'data-settings': 'summary' },
-    h('div', { class: 'settings-section-head' }, h('h4', { text: t('摘要与用量') })),
+    [key, h('input', { type: 'number', min, max, step: 1, value, 'data-field': key, 'aria-label': t(label), onchange: save })]));
+  return settingsGroup('summary', '摘要与用量', null,
     h('div', { class: 'settings-grid' }, ...specs.map(([key, label]) => settingsField(label, inputs[key]))),
     h('p', { class: 'settings-note', text: t('开启时至少间隔 30 秒。仅发送上一版摘要和新增转写；新增字数不足时跳过自动摘要，手动总结不受此限制。目标字数由模型遵循，可能略有超出。') }),
-    h('button', { class: 'btn tiny primary', text: t('保存配置'), onclick: () => {
-      if (specs.some(([key]) => !inputs[key].value || !inputs[key].checkValidity())) return showBanner(t('请输入有效的时间数值'), 'error');
-      settingsAction(() => patchConfig({ summary: {
-        autoMs: Number(inputs.autoMs.value) * 1000,
-        minNewChars: Number(inputs.minNewChars.value), maxChars: Number(inputs.maxChars.value),
-      } }), '设置已保存');
-    } }));
+    status);
+}
+
+function speakerSettings(speakers = {}, providers = []) {
+  const engine = providers.find((p) => p.name === (speakers.provider || 'deepgram'));
+  const ready = !!engine && engine.enabled && engine.ready;
+  const status = h('small', { class: 'settings-note autosave-state', role: 'status' });
+  const auto = h('input', { type: 'checkbox', checked: !!speakers.autoDiarize, 'data-field': 'autoDiarize',
+    onchange: (e) => autosave(status, { speakers: { autoDiarize: e.target.checked } }) });
+  return settingsGroup('speakers', '说话人校正', t(ready ? '可用' : '需要 Deepgram 密钥'),
+    h('label', { class: 'settings-check' }, auto, ' ', t('录音或导入结束后自动用整段录音校正说话人')),
+    h('p', { class: 'settings-note', text: t('逐句识别时，每次请求都会重新给说话人编号，所以大多数句子会被标成说话人1。校正会把整段录音再发送给 Deepgram 一次（按时长计费），按时间重新分配说话人；文字和翻译不变，可撤销。也可以在转写区手动点击「整场校正说话人」。') }),
+    status);
 }
 
 function isDeepSeekProvider(provider) {
@@ -1613,15 +2169,23 @@ function taskModelSettings(roleName, role, providers, catalog) {
     thinking.disabled = !isDeepSeekProvider(selectedProvider());
   } }, ...providers.map((p) => h('option', { value: p.name, selected: p.name === role.provider, text: p.label + (p.enabled ? '' : ' · ' + t('未启用')) })));
   thinking.disabled = !isDeepSeekProvider(selectedProvider());
-  return h('div', { class: 'task-model-card setting-card', 'data-task': roleName },
+  const status = h('small', { class: 'settings-note autosave-state', role: 'status' });
+  // Changes bubble up from the provider, model and thinking controls; the
+  // provider's own handler has already reset the model by the time this runs.
+  const save = () => {
+    if (!model.value()) {
+      status.textContent = t('输入模型 ID');
+      status.dataset.state = 'error';
+      return;
+    }
+    autosave(status, { llm: { roles: { [roleName]: {
+      provider: provider.value, model: model.value(), thinking: thinking.value,
+    } } } });
+  };
+  return h('div', { class: 'task-model-card setting-card', 'data-task': roleName, onchange: save },
     h('strong', { text: t(labels[roleName] || roleName) }),
     h('div', { class: 'settings-grid' }, settingsField('服务', provider), settingsField('选择模型', model.element), settingsField('思考模式', thinking)),
-    h('button', { class: 'btn tiny primary', 'data-action': 'save-task', text: t('保存配置'), onclick: () => {
-      if (!model.value()) return showBanner(t('输入模型 ID'), 'warn');
-      settingsAction(() => patchConfig({ llm: { roles: { [roleName]: {
-        provider: provider.value, model: model.value(), thinking: thinking.value,
-      } } } }), '设置已保存');
-    } }));
+    status);
 }
 
 function settingsField(label, input) {
@@ -1629,12 +2193,15 @@ function settingsField(label, input) {
 }
 
 async function settingsAction(action, success) {
+  state.settingsWarning = '';
   try {
     const result = await action();
     if (result?.status) state.status = result.status;
     await rebuildDrawer(openSettings);
     applyStatus(state.status);
-    showBanner(t(success));
+    // A warning raised during the action (a damaged key file) outranks the success note.
+    if (state.settingsWarning) showBanner(state.settingsWarning, 'warn');
+    else showBanner(t(success));
   } catch (err) { showBanner(err.message, 'error'); }
 }
 
@@ -1681,6 +2248,8 @@ function providerCard(category, provider, catalog) {
       h('button', { class: 'btn tiny primary', text: t('保存配置'), onclick: saveProvider }),
       category === 'llm' ? h('button', { class: 'btn tiny', text: t('选择任务模型'), onclick: () => {
         const target = els.drawerBody.querySelector('[data-task="summary"]');
+        const group = target?.closest('details');
+        if (group) group.open = true;
         target?.scrollIntoView({ block: 'start', behavior: 'smooth' });
         target?.querySelector('select')?.focus({ preventScroll: true });
       } }) : null,
@@ -1753,6 +2322,11 @@ async function setCredential(name, value) {
   });
   const json = await res.json();
   if (json.error) throw new Error(json.error);
+  // The old key file was unreadable and has been backed up; other keys need re-entering.
+  if (json.warning) {
+    state.settingsWarning = json.warning;
+    showBanner(json.warning, 'warn');
+  }
   return json;
 }
 
@@ -1772,6 +2346,13 @@ async function patchConfig(patch) {
 // --------------------------------------------------------------------------
 
 async function boot() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('babel-note-options-v1') || '{}');
+    if (['meeting', 'class'].includes(saved.mode)) els.noteMode.value = saved.mode;
+    if (['standard', 'detailed'].includes(saved.notesDetail)) els.notesDetail.value = saved.notesDetail;
+    els.includeTranscript.checked = localStorage.getItem('babel-md-include-transcript') === 'true';
+    els.autoMinutes.checked = localStorage.getItem('babel-auto-minutes') !== 'false';
+  } catch { /* Defaults: meeting, detailed, no transcript in Markdown. */ }
   bindControls();
   const requestedUi = new URLSearchParams(location.search).get('ui');
   if (['zh', 'ja', 'en'].includes(requestedUi)) state.uiLanguage = requestedUi;
@@ -1824,7 +2405,8 @@ async function boot() {
   const id = params.get('meeting');
   if (id) await openMeeting(id).catch(() => {});
   if (params.get('history') === '1') await openHistory();
-  if (params.get('settings') === '1') await openSettings();
+  const settings = params.get('settings');
+  if (settings) await openSettings(settings === '1' ? undefined : settings);
 }
 
 if (new URLSearchParams(location.search).has('selftest')) {

@@ -5,7 +5,9 @@
 这里保留项目架构、协议、数据模型、测试流程、已知限制与排障记录。
 接手修改代码前，**请先读 §3「接手须知」**，再查阅相关章节中的不变量和已踩过的坑。
 
-**源码版本：`0.1.0-beta.4`（测试中，已发布安装包仍为 beta.3）。** 尚未发布正式稳定版本，也未提供开源许可证。录音与外部模型的数据处理说明见 [PRIVACY.md](PRIVACY.md)，安全边界见 [SECURITY.md](SECURITY.md)。
+**源码版本：`0.1.0-beta.10`（公开预发布）。** 源码采用根目录 Apache-2.0 许可证，尚未发布稳定版。安装包见 [Releases](https://github.com/ndof0ssome-114/babel-echo/releases)。本仓库是私有开发仓库中 `apps/desktop` 的发布快照，开发在私有仓库进行，每次公开发布时同步。
+
+统一验证入口为 `npm run test:offline`（语法检查及 13 组离线测试），推送或 PR 到 `main` 时由根目录 `.github/workflows/desktop-ci.yml` 在 Windows 与 Ubuntu 上运行。Electron/打包依赖建议 Node.js 24 LTS；核心服务最低 Node.js 20。Mac CI 位于根 `.github/workflows/desktop-macos.yml`，不在本应用子目录；`desktop-v*` 标签生成未签名测试包和不含用户数据的测试资料，真机验证仍须执行 Mac 交接清单。
 
 品牌图标根据项目使用者提供的角色参考图生成，源图与各尺寸图标见 `desktop/build/`。仓库公开不表示授予第三方复用该角色或图标的许可；再分发前应确认相应授权。
 
@@ -78,11 +80,13 @@
 
 ```powershell
 cd <你的项目目录>\babel-echo
+npm ci --prefix desktop     # 首次生成本地 Markdown 资源
 node server.mjs 8777          # 或 .\start.ps1
-# 打开 http://127.0.0.1:8777
+# 打开终端打印的 http://127.0.0.1:8777/?token=… 链接（每次启动的令牌不同）
 ```
 
-密钥可在「设置」中保存，也可从环境变量或 `~/.dsh/.credentials.yaml` 读取。首次使用云端模型时需要配置对应的密钥。
+密钥默认只从「设置」中保存的本应用凭据读取。仅在显式设置 `MIAOJI_ALLOW_ENV_CREDENTIALS=1` 时，才额外读取以 `_KEY` 结尾的环境变量；不读取 DeepSeek Harness 或其他应用的凭据文件。首次使用云端模型时需要配置对应的密钥。
+Electron 桌面窗口提供原生「编辑」菜单和文本右键菜单，可在输入框及已选文字上使用撤销、剪切、复制、粘贴和全选。macOS 的菜单与鼠标操作仍需在目标系统复测。
 
 录音前可在顶部「麦克风」下拉框选择输入设备；点击「刷新设备」可授权并显示设备名称。点击「测试麦克风」并说话，确认音量条有反应。Windows 与 macOS 13+ 桌面版默认勾选「同时录电脑声音」，把所选麦克风与系统播放声音混合录入；可在开始前取消勾选。macOS 会请求屏幕与系统音频权限，但取得音频轨道后立即停止视频轨道，不保存或传输画面。
 录音中也可切换，界面会显示实际连接的麦克风。桌面版会记住选择，并在下次启动时按设备名称重新匹配。
@@ -90,7 +94,9 @@ node server.mjs 8777          # 或 .\start.ps1
 
 ### 自定义模型与界面语言
 
-- 顶部「界面语言」可切换简体中文、日本語和 English；语音识别与翻译另支持韩语、法语、德语、西班牙语。
+- 「设置 → 外观」是独立标签页，支持默认玻璃主题与 Endspace 风格主题，并可调整强调色、阅读字号、圆角、间距和纹理。主题与明暗模式独立；浏览器用 `babel-echo-appearance-v1` localStorage，读取时兼容旧 `miaoji-theme`。Electron 通过 `miaoji:appearance-get/set` IPC 以 userData 中原子保存的 `appearance.json` 为准，跨随机端口持久化；首次从当前 origin 的偏好初始化。实现由 `public/appearance.js`、`appearance-settings.js` 和 `appearance.css` 管理；不修改会议/模型配置，不加载外部字体或媒体。详细 schema、范围与来源见 [主题说明](../../docs/UI_THEMES.md)，离线验证命令为 `npm run test:appearance`。
+
+- 底部状态栏的「界面语言」可切换简体中文、日本語和 English；语音识别与翻译另支持韩语、法语、德语、西班牙语。
 - 「设置 → 语音识别引擎」可启用、编辑模型 ID 与接口地址、更新 API Key，或新增 OpenAI Audio / Deepgram / MiMo 协议的自定义引擎。按语言路由决定每种语音使用哪个引擎。
 - 「设置 → 实时识别节奏」可调整预览发送间隔、停顿定稿时间、最长单句和硬切时保留的衔接音频。预览刷新与句子定稿独立：停顿可提前定稿；Groq 预览由于请求额度最低按 10 秒间隔发送。
 - 分句策略参考 [Deepgram 的可调静音端点](https://developers.deepgram.com/docs/endpointing)、[whisper.cpp 的 `--keep` 重叠音频](https://github.com/ggml-org/whisper.cpp/blob/941bdabb/examples/stream/stream.cpp) 和 [Whisper-Streaming 的局部确认与句末裁剪](https://arxiv.org/html/2307.14743v2)。当前应用用本地音量门限判停顿；长句到上限后最多再等 5 秒寻找停顿，仍不停顿才保留默认 1.2 秒重叠音频并去除可确定的重复文字。噪声大或多人同时说话时，纯音量门限仍可能误判，原始音频会完整保存。
@@ -121,9 +127,9 @@ npm start
 
 ```powershell
 cd desktop
-npm run dist              # → ../dist/BabelEcho-0.1.0-beta.4-setup.exe（安装向导）
-npm run dist:portable     # → ../dist/BabelEcho-0.1.0-beta.4-portable.exe（单文件）
-npm run dist:mac          # → ../dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg / .zip（需在 Mac 上运行）
+npm run dist              # → ../dist/BabelEcho-0.1.0-beta.9-setup.exe（安装向导）
+npm run dist:portable     # → ../dist/BabelEcho-0.1.0-beta.9-portable.exe（单文件）
+npm run dist:mac          # → ../dist/BabelEcho-0.1.0-beta.9-mac-arm64.dmg / .zip（需在 Mac 上运行）
 ```
 
 安装版会弹出向导，选择安装范围和目录后再安装；已有安装升级时沿用原目录。卸载会先确认，再询问是否保留本机会议录音、转写、存档和设置，默认保留；选择删除才会在卸载完成后移除当前用户的应用数据（包括 API Key）。静默卸载和版本升级始终保留数据。
@@ -155,7 +161,7 @@ npm run dist:mac          # → ../dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg / .
   └─ 出网：MiMo ASR / Groq ASR / Deepgram ASR / DeepSeek LLM
 ```
 
-**没有数据库，没有构建步骤，没有框架。** 会议就是 `data/meetings/<id>.json`。
+**没有数据库，没有前端应用框架。核心服务无 npm 运行时依赖；富 Markdown 的第三方资源需一次本地构建，安装桌面依赖时自动生成。** 会议就是 `data/meetings/<id>.json`。
 
 ### 3.2 改代码的正确顺序
 
@@ -163,7 +169,7 @@ npm run dist:mac          # → ../dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg / .
 2. 跑 `node scripts/test-adapters.mjs`（1 秒，不联网，覆盖 ASR 适配器和路由）
    和 `node scripts/test-regressions.mjs`（不联网，覆盖翻译关闭、导入进度、WS 统计请求）
 3. 涉及流水线的改动跑 `node scripts/e2e.mjs`（约 3 分钟，需要真实 key）
-4. 涉及前端的改动跑 `cd desktop; npm test`（有麦克风时 32 项，包含真实 UI 点击）
+4. 涉及前端的改动跑 `cd desktop; npm test`（有麦克风时 70 项，包含真实 UI 点击）
 5. **改了前端一定要截图肉眼确认**（见 §14.3）
 
 ### 3.3 最容易破坏的三件事
@@ -180,7 +186,7 @@ npm run dist:mac          # → ../dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg / .
 | --- | --- | --- |
 | **零 npm 依赖（核心服务）** | 目标环境的沙箱 `pnpm/npm install` 不稳定；单文件可拷贝即跑 | 手写了 WebSocket 服务端、WAV 编解码、multipart 上传发送 |
 | **手写 RFC6455** | Node 只内置 WS 客户端 | `lib/ws.mjs` 约 280 行需自己维护 |
-| **原生 ES 模块前端，无框架** | 无构建步骤，一个 `node server.mjs` 就能开发 | DOM 用手写 `h()` helper；状态管理靠手写 |
+| **原生 ES 模块前端，无框架** | 应用源码直接加载；Markdown 第三方依赖由 esbuild 构建为本地模块 | DOM 用手写 `h()` helper；状态管理靠手写 |
 | **服务端做 VAD 与分句** | 单一事实来源，多客户端可同时观看同一会议 | 音频必须原样上行（不能只传压缩包） |
 | **整段重发做 interim** | 结果自洽，不需要前后缀对齐算法 | 音频用量约 3 倍（但对 $0.04/小时无所谓） |
 | **Electron 用 `ELECTRON_RUN_AS_NODE` 跑内嵌服务** | 打包后不需要用户装 Node | 主进程要多管一个子进程生命周期 |
@@ -207,7 +213,7 @@ babel-echo/
 ├── lib/
 │   ├── ws.mjs                  手写 RFC6455 WebSocket 服务端
 │   ├── wav.mjs                 WAV 头读写、Float32→Int16、RMS、静音切片
-│   ├── env.mjs                 凭据加载（env > DSH > 本地）+ 本地凭据写入
+│   ├── env.mjs                 本应用凭据加载/写入 + 显式选择的环境变量
 │   ├── config.mjs              配置默认值 / 加载 / 原地保存 / provider 状态
 │   ├── llm.mjs                 LLM 客户端（固定输出上限、逐次用量、JSON 修复）
 │   ├── prompts.mjs             全部提示词，改提示词只改这个文件
@@ -479,16 +485,15 @@ MiMo 特例：只允许明确的中文和英文请求；日语不会回退到 Mi
 
 ### 7.3 凭据（`lib/env.mjs`）
 
-三个来源，**优先级从高到低**：
+默认只使用本应用凭据。选择启用环境变量时，**优先级从高到低**：
 
 | 优先级 | 来源 | 用途 |
 | --- | --- | --- |
 | 1 | `data/credentials.json` | **设置界面保存的 key；更新后立即生效** |
-| 2 | 进程环境变量 | CI / 临时配置 |
-| 3 | `~/.dsh/.credentials.yaml` 的 `refs:` 段 | 本机集中管理（DSH 原生） |
+| 2 | 进程环境变量中以 `_KEY` 结尾的名称 | 仅 `MIAOJI_ALLOW_ENV_CREDENTIALS=1` 时用于 CLI / 临时配置 |
 
 `config.json` **只存 `keyRef`（变量名），永远不存 key 的值**。
-`POST /api/credentials` 只写第 1 层，绝不触碰用户的 DSH 配置。清除界面保存的 key 后，会重新使用环境变量或 DSH 中的值。
+`POST /api/credentials` 只写第 1 层，不读取或修改其他应用的密钥文件。清除界面保存的 key 后，默认视为未配置；只有显式启用环境变量时才可能使用对应环境密钥。升级前若只依赖 `~/.dsh/.credentials.yaml`，须在设置里自行输入密钥；旧文件不会被修改或删除。
 
 已知的 key 名：`XIAOMI_API_KEY`、`DEEPSEEK_API_KEY`、`GROQ_API_KEY`、
 `DEEPGRAM_API_KEY`、`LOCAL_ASR_KEY`、`LOCAL_LLM_KEY`。
@@ -513,6 +518,8 @@ data/
 
 所有响应都是 JSON（`content-type: application/json`），错误形如 `{"error":"…"}`。
 静态资源从 `public/` 直接提供。
+
+**访问令牌（2026-11-02 起）。** 服务启动时由 `resolveAccessToken()` 生成随机令牌（测试可用 `MIAOJI_ACCESS_TOKEN` 固定，读取后立即从环境删除），并写入 `MIAOJI_READY` 的 `accessToken`/`accessCookie`，终端另打印 `/?token=` 链接。除 Host/Origin 检查外，所有请求（含静态页面）必须带 `Authorization: Bearer <token>` 或 Cookie `babel_echo_access_<port>`，否则 API 返回 401 JSON、页面返回 401 说明页。非 API 的 GET 若带正确 `?token=`，返回设置 HttpOnly/SameSite=Strict Cookie 的过渡页，再由本站 meta refresh 跳到去掉令牌的地址；API 不接受 URL 令牌。脚本用 `scripts/server-auth.mjs` 的 `useServerToken()`。
 
 ### 8.1 应用状态
 
@@ -559,7 +566,7 @@ data/
 | --- | --- | --- | --- |
 | GET | `/api/config` | — | 完整 config 对象 |
 | POST/PATCH | `/api/config` | 部分 config（深合并） | `{ok:true, status}` |
-| GET | `/api/credentials` | — | `{sources:{central,local}, configured:[名字]}`（**不含值**） |
+| GET | `/api/credentials` | — | `{sources:{local,environment}, configured:[名字]}`（**不含值**） |
 | POST | `/api/credentials` | `{name,value}` | `{ok:true, name, configured, status}` |
 
 `value` 传空字符串 = 删除该凭据。`name` 必须是 `/^[A-Z][A-Z0-9_]*$/`。
@@ -606,6 +613,8 @@ data/
 | POST | `/api/meetings/:id/ask` | `{question}` | 基于全文问答 → `{entry:{question,answer,at}}` |
 | POST | `/api/meetings/:id/speakers` | `{action:"rename",from,to}` | 批量改名 → `{speakers}` |
 | POST | `/api/meetings/:id/speakers` | `{action:"resplit"}` | LLM 重排说话人 → `{speakers,segments}` |
+| POST | `/api/meetings/:id/speakers` | `{action:"diarize"}` | 整段录音交给 Deepgram 校正说话人 → `{speakers:n,changed,segments}` |
+| POST | `/api/meetings/:id/speakers` | `{action:"undo-diarize"}` | 恢复校正前的说话人标注 → `{speakers,segments}` |
 
 ### 8.7 导入
 
@@ -623,7 +632,7 @@ data/
 
 ## 9. WebSocket 协议参考
 
-连接：`ws://127.0.0.1:<port>/ws?meeting=<id>`
+连接：`ws://127.0.0.1:<port>/ws?meeting=<id>`（浏览器自动带访问 Cookie；无法设 Cookie/请求头的脚本加 `&token=<token>`，缺失或错误时升级返回 403）
 （或 `?new=1&title=…&language=…&translateTo=…` 现场建一个）
 
 ### 9.1 客户端 → 服务端
@@ -635,12 +644,13 @@ data/
 | `start` | `title?` `language?` `translateTo?` | 开始录音（会先写入这些元数据） |
 | `pause` | — | 暂停（音频继续上行但被丢弃） |
 | `resume` | — | 继续 |
-| `stop` | — | 结束 → 等 ASR 清空 → 落音频 → 生成纪要 |
+| `stop` | `minutes?` | 结束 → 等 ASR 清空 → 落音频 → 生成纪要（`minutes:false` 时跳过，之后可手动生成） |
 | `config-patch` | `title?` `language?` `translateTo?` | 改元数据并广播 `meta` |
 | `summarize` | — | 手动滚动总结 |
 | `minutes` | `targetLang?` | 手动生成纪要 |
 | `ask` | `question` | 提问 |
-| `rename-speaker` | `from` `to` | 说话人改名 |
+| `rename-speaker` | `from` `to` | 说话人改名；`to` 与已有说话人同名时两者合并 |
+| `set-segment-speaker` | `index` `speaker` | 只改一句的说话人（新名字会登记到说话人表） |
 | `resplit-speakers` | — | LLM 重排说话人 |
 | `ping` | — | 心跳 |
 
@@ -656,18 +666,21 @@ data/
 | `hello` | `{meeting, status, asrAvailable[]}` | 连接建立 |
 | `segments` | `{segments:[]}` | 连接建立时补发历史（迟到的观看者） |
 | `segment` | `{segment}` | 定稿一句 |
-| `segment-update` | `{index, translation}` | 某句翻译回来 |
+| `segment-update` | `{index, translation}`、`{index, text, end, open}` 或 `{index, speaker}` | 某句翻译回来；或未完成的句子被下一段接上 / 定稿 |
 | `partial` | `{utteranceId, text, start, end, provider}` | 临时识别结果（会被下次覆盖） |
 | `level` | `{rms:0..1, voice:bool}` | 每帧音量（画波形） |
 | `status` | `{state}` | 状态机变化 |
 | `summary` | `{summary, upTo}` | 滚动总结更新 |
 | `summary-pending` | `{}` | 开始总结（UI 转圈） |
-| `minutes` | `{minutes}` | 结构化纪要就绪 |
+| `minutes-pending` | `{}` | 开始生成纪要 |
+| `minutes` | `{minutes}` | 结构化纪要就绪；失败时发 `error`，带 `minutes: true` |
 | `answer` | `{question, answer, at}` | 问答回答 |
-| `speakers` | `{speakers}` | 说话人表变化 |
+| `speakers` | `{speakers, speakerBackup?}` | 说话人表变化；带 `speakerBackup` 时表示可撤销状态变化 |
+| `diarize-pending` | `{}` | 开始整场校正说话人 |
+| `diarize-done` | `{speakers, changed}` | 校正完成（只发给发起的连接） |
 | `meta` | `{title, language, translateTo}` | 元数据变化 |
 | `import-progress` | `{done, total, seconds, totalSeconds}` | 导入每完成一块 |
-| `import-done` | `{segments, durationMs}` | 导入完成 ⚠️ **前端尚未处理，见 §16** |
+| `import-done` | `{segments, durationMs}` | 导入完成，前端更新进度与会议状态 |
 | `audio` | `{audio:{ext,bytes}}` | 音频文件就绪（前端据此加载播放器） |
 | `stats` | `{stats}` | 结束录音后推送用量 |
 | `saved` | `{id}` | 落盘完成 |
@@ -696,10 +709,10 @@ providerStatus(config, creds) → {asr[], llm[], routes, active, roles, realtime
 ### `lib/env.mjs`
 
 ```js
-loadCreds()                  → {NAME: value}   // 合并三个来源，带缓存
+loadCreds()                  → {NAME: value}   // 本应用凭据 + 显式启用的环境变量，带缓存
 cred(name)                   → string          // 取不到就抛错
 setLocalCred(name, value)    → {name, configured}  // 写 data/credentials.json 并热更新缓存
-LOCAL_CRED_PATH, CRED_PATH   // 两个来源的绝对路径
+LOCAL_CRED_PATH              // 本应用凭据的绝对路径
 ```
 
 ### `lib/llm.mjs`
@@ -832,6 +845,10 @@ audioPath(id, ext) → string
 findAudio(id) → {path, ext, size}|null    // 按 .mp3/.wav/.webm/.m4a/.ogg 顺序找
 ```
 
+会议 JSON 写入同目录的唯一 `.tmp` 文件，完整写入后通过 rename 替换目标；写入或替换失败时保留上一版并尽力清理临时文件。异常退出留下的 `.tmp` 不参与历史列表。保存前校验会议 ID，不改变已有 JSON schema。
+
+删除正在录音、暂停或导入处理的会议返回 `409`。可删除会议先调用 `Meeting.dispose()`，取消保存/翻译/摘要定时器并阻止迟到模型回调重新落盘；旧 WebSocket 收到后续命令会返回“会议已删除”。导入在读取异步请求体后再次检查会议是否删除或忙碌，避免等待上传期间发生状态竞态。文件导入与实时识别统一走 `commitSegment()`，保留 provider 的说话人及时间戳；同一 speaker 的多个 utterance 也优先使用 provider 标签。
+
 ### `lib/import.mjs`
 
 ```js
@@ -905,6 +922,14 @@ final 会排队（不会丢）。见 §13.2。
 不要为了"简单"把 PCM 收进数组。两小时会议 = 230MB 堆内存。
 必须先写 44 字节占位头，结束时用 `openSync(path,'r+')` 回填。
 
+录音生命周期（2026-11-03 起）：
+
+- `processing`/`stopped` 的会议调用 `start()` 会抛错，不能重开。否则会重建 `data/tmp/<id>.pcm`、时钟归零，并在下次停止时覆盖已保存的音频。UI 本来就会为已结束会议新建记录。
+- `stop()` 可重入：WebSocket、20 秒无人连接计时器和 `shutdown` 共用同一个 `this.stopping`。WS `stop` 对 `processing`（导入或正在停止）和 `stopped` 不做处理，纪要不会生成两次。
+- 无人连接 20 秒后，录音中和**暂停中**的会议都会被停止并落盘。
+- 服务启动时 `lib/recovery.mjs` 先占用 `data/tmp/recorder.pid`（另一个存活的服务持有时跳过，以免抢走它正在写的文件），再把崩溃遗留的 `<id>.pcm` 修正头部、去掉半个样本后改名为 `data/audio/<id>.wav`，并把会议标为 `stopped`、补上 `audio` 与时长。找不到会议或会议已有音频的文件原样保留并记日志；只删除没有音频数据的 44 字节文件。恢复的音频保持 WAV，不调用 ffmpeg。
+- 测试：`npm run test:recording-lifecycle`。
+
 ### 11.6 `ws.mjs` 的 `emit('error')` 必须有守卫
 
 Node 的 `EventEmitter` 在**没有 `'error'` 监听器**时 `emit('error')` **会直接抛异常**。
@@ -915,6 +940,10 @@ Node 的 `EventEmitter` 在**没有 `'error'` 监听器**时 `emit('error')` **�
 
 - 任何显式 `display` 都会盖过 `hidden` 属性的 UA 样式 → 全局加 `[hidden]{display:none!important}`
 - flex 列布局里可滚动子项必须 `flex:1 1 auto; min-height:0`，否则 `overflow:auto` 永不生效
+
+### 11.8 每个入口都要过访问令牌
+
+新增路由、静态目录或 WebSocket 路径时，不得绕过 `server.mjs` 请求处理器开头的 `requestAccess()` 与 `isTrustedLocalRequest()`。Electron 主进程用 Node `fetch` 访问服务时必须走 `serverFetch()`（它不共享窗口 Cookie）；新窗口若改用非默认 session/partition，必须先写入访问 Cookie。不要让 API 接受 URL 令牌，也不要把令牌写入会议数据、日志文件或 `/api/*` 响应。
 
 ---
 
@@ -996,6 +1025,7 @@ Haruka/Ichiro/Sayaka/Ayumi 都是 ja-JP 语音）。
 ```powershell
 node scripts/test-adapters.mjs      # 25 项
 node scripts/test-regressions.mjs   # 翻译关闭、跳过/失败分片进度、WS 统计请求
+node scripts/test-storage.mjs       # 写入/替换失败保护旧数据、删除后迟到模型回调
 node scripts/test-realtime-timing.mjs   # 发送间隔、长句衔接、重复文字处理
 node scripts/test-language-migration.mjs # MiMo 日语限制与旧配置升级
 ```
@@ -1051,11 +1081,12 @@ node scripts/confirm-tts-hypothesis.mjs  # 证明乱码来自 TTS
 - MiMo：明确的日语请求在出网前被拒绝
 - 全流程：服务端走 Groq、翻译齐全、纪要生成、计费正确
 
-### 13.5 桌面外壳自检（有麦克风时至少 49 项）
+### 13.5 桌面外壳自检（默认合成麦克风）
 
 ```powershell
 cd desktop
-npm test        # = electron . --selftest
+npm test        # = electron . --selftest；不打开物理输入
+npm test -- --reader # 独立阅读器生命周期；无录音采集
 ```
 
 真的把 Electron 跑起来，然后断言：
@@ -1071,6 +1102,7 @@ npm test        # = electron . --selftest
   滚到底可达 → 切开关**能持久化** → 抽屉保持打开 → × 关闭 / Esc 关闭 / 点背景关闭 / 按钮 toggle
 - Flash/Pro 切换、思考模式、服务切换后模型发现、手动 ID、摘要间隔与字数门限保存。模型发现使用 mock；配置写入经过真实本机 API。自检和截图使用临时数据与凭据目录，避免改写用户设置。
 - `node scripts/test-llm-cost.mjs`：完全离线检查实际请求模型 ID、思考参数边界、截断不增额重试、HTTP/JSON 重试用量、摘要游标并发及落盘、各文本任务统计与门限。
+- 新增 5 项外观自检：主题/参数通过 IPC 保存、本机偏好文件、origin 存储为空时恢复、主题参数隔离、重置范围；beta.7 另含独立阅读器、摘要入口、图表标签、公式、图片和 PDF 自检，总计 70 项。`scripts/test-appearance.mjs` 另覆盖旧明暗模式、损坏/不可用存储、数值范围、颜色校验、系统模式与文字对比色。
 
 ### 13.6 回归清单（提交前）
 
@@ -1116,7 +1148,7 @@ npm run dev      # = electron . --dev，自动打开 DevTools
 ```powershell
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new `
   --user-data-dir="$env:TEMP\mj" --window-size=1680,1000 --virtual-time-budget=9000 `
-  --screenshot="$env:TEMP\miaoji-shot.png" "http://127.0.0.1:8777/?meeting=<id>&settings=1"
+  --screenshot="$env:TEMP\miaoji-shot.png" "http://127.0.0.1:8777/?meeting=<id>&settings=1&token=<启动时打印的令牌>"
 ```
 
 Electron 版（能抓任意深链接状态）：
@@ -1126,7 +1158,7 @@ cd desktop
 npx electron . --capture=../.probe/shot.png --open=meeting=<id>&settings=1
 ```
 
-支持的前端深链接：`?meeting=<id>`、`?settings=1`、`?history=1`。
+支持的前端深链接：`?meeting=<id>`、`?settings=1`（上次的设置标签页）、`?settings=quick|advanced|appearance`、`?history=1`。
 截图产物在 `.probe/`（gitignored），需要时重新生成。
 
 ### 14.4 改提示词
@@ -1179,7 +1211,7 @@ npx electron . --capture=../.probe/shot.png --open=meeting=<id>&settings=1
 | `MIAOJI_CONFIG_PATH` | 覆盖 config.json 路径 |
 | `MIAOJI_PARENT_WATCHDOG=1` | stdin 关闭即退出（Electron 子进程用） |
 | `ELECTRON_RUN_AS_NODE=1` | 让 Electron 二进制当纯 Node 跑 |
-| `DSH_HOME` | 覆盖 `~/.dsh`（凭据文件位置） |
+| `MIAOJI_ALLOW_ENV_CREDENTIALS=1` | 显式允许读取以 `_KEY` 结尾的进程环境变量；默认关闭 |
 
 ### 15.3 启动握手协议
 
@@ -1196,15 +1228,15 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
 
 | 命令 | 产物 | 大小 |
 | --- | --- | --- |
-| `npm run dist` / `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.4-setup.exe` | — |
-| `npm run dist:portable` | `dist/BabelEcho-0.1.0-beta.4-portable.exe` | ~100MB |
-| `npm run dist:mac` | `dist/BabelEcho-0.1.0-beta.4-mac-arm64.dmg` + `.zip` | 仅 M 芯片；公开分发前签名并公证 |
+| `npm run dist` / `npm run dist:installer` | `dist/BabelEcho-0.1.0-beta.9-setup.exe` | — |
+| `npm run dist:portable` | `dist/BabelEcho-0.1.0-beta.9-portable.exe` | ~100MB |
+| `npm run dist:mac` | `dist/BabelEcho-0.1.0-beta.9-mac-arm64.dmg` + `.zip` | 仅 M 芯片；公开分发前签名并公证 |
 | `npm run dist:dir` | `dist/win-unpacked/`（免安装目录） | ~368MB |
 
 打包时 `server.mjs` / `lib/` / `public/` 作为 `extraResources` 进 `resources/`，
 `main.cjs` 用 `app.isPackaged ? process.resourcesPath : path.join(__dirname,'..')` 定位。
 
-验证打包版：`dist/win-unpacked/巴别回声.exe --selftest`（有麦克风时目前 43 项应全过）。
+验证打包版：`dist/win-unpacked/巴别回声.exe --selftest`（有麦克风时目前 70 项应全过）。
 
 ---
 
@@ -1231,7 +1263,7 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
   （Groq Whisper 支持 `prompt` 参数，对专有名词提升明显）
 - **会议搜索**：把 segments 建 FTS（SQLite FTS5 或简单倒排），支持全文检索
 - **批量导入**：一次拖多个文件，队列化
-- **导出 docx / PDF**：目前只有 md/vtt/txt/json
+- **导出 docx**：尚未实现；PDF 已通过独立 Markdown 阅读器支持，另保留 md/vtt/txt/json 导出
 
 **中等**
 
@@ -1255,6 +1287,7 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
   `commitSegment()` 会把一块音频拆成多个 segment —— **这是唯一真正的分离**
 - 其他引擎靠 `inferSpeaker()`：停顿 ≥1.4s 就轮换到下一个已知说话人
 - `resplitSpeakers()` 让 LLM 按语言线索（称呼、应答、问答关系）重新归属
+- 逐句请求时 Deepgram 每次都从 0 号编号，跨请求不连贯；`diarizeRecording()` 用整段录音再请求一次，得到整场一致的编号（见文末「句子重组与整场说话人校正」）
 
 **改进方向（按性价比）**：
 
@@ -1326,5 +1359,76 @@ MIAOJI_READY {"url":"http://127.0.0.1:6891/","host":"127.0.0.1","port":6891,"pid
 
 ## 许可
 
-仓库公开并提供 GitHub 预发布版，但当前未提供开源许可证；`package.json` 中的 `"private": true` 仅用于防止误发布到 npm。使用到的第三方服务：
+源码采用仓库根目录 Apache-2.0 许可证；品牌和角色图稿的使用边界见根 README。`package.json` 中的 `"private": true` 用于防止误发布到 npm。当前集成测试包位于私有 GitHub Release。使用到的第三方服务：
 Xiaomi MiMo API、DeepSeek API、Groq API、Deepgram API，各自的条款与计费另计。
+
+
+## beta.7：富 Markdown 与独立阅读器
+
+`public/markdown.js` / `markdown.css` 是摘要和阅读器共享的异步渲染入口，使用 Markdown-it、DOMPurify、KaTeX 与 strict Mermaid；失效渲染通过 WeakMap 取消，避免旧会议覆盖新内容。`reader.html/js/css` 提供目录、源码、字号、明暗与打印视图。`desktop/markdown-reader.cjs` 创建独立 sandbox 窗口，`reader-preload.cjs` 仅提供文档快照、文件选择、受限图片、打印/PDF IPC；不暴露录音、凭据和任意文件访问。`markdown-files.cjs` 校验编码、体积和真实路径边界。`--reader` 可单独启动；从阅读器切回工作台时按需创建主窗口及录音外壳。
+
+先运行 `npm ci --prefix desktop`（安装后自动构建资源）或 `npm run assets:markdown`。输出位于被 Git 忽略的 `public/vendor/markdown/`，含本地字体及第三方许可证；无 CDN。核心服务依然无运行时 npm 依赖，源码运行需先准备这些前端资源。`npm run test:offline` 为 11 组（含 `test:markdown`），`npm run desktop:test` 在 Windows 有麦克风环境验证 70 项。摘要只发送已有摘要与新片段，图表不增加调用和输出预算；保存字段仍是原始 Markdown 字符串，无数据迁移。详细格式、资源限制及真机边界见 [Markdown 阅读器](../../docs/MARKDOWN_READER.md)。
+
+## beta.8：Mac 生命周期与本机构建
+
+Dock `activate` 在 `--reader` 且尚未显式打开工作台时，只恢复/聚焦已有阅读器，最后一个阅读器关闭后重建阅读器。通过菜单打开工作台后恢复正常录音外壳行为；录音中关窗保护不变。`reader-lifecycle-selftest.cjs` 以真实 Electron 检查菜单、Dock、重复启动事件、最小化恢复、关窗重开及录音关窗保护。
+
+Mac 主程序及 Helper 使用 `build/entitlements.mac.plist`；内部包使用 `--config.mac.identity=-` 作 ad-hoc 签名并保留音频输入权限，未 Developer ID 签名/未公证。`identity=null` 会跳过权限签名，不能用于可录音的 Mac 包。打包自检读取实际 5 个 bundle 的签名。此修复来自旧 Mac 本地 aac5a89 的已知验证，但 beta.8 不继承其物理麦克风通过结论。
+
+默认自检通过 `synthetic-microphone.cjs` 替换输入设备枚举与采集，不会选择 iPhone 连续互通。物理麦克风须显式 `--selftest-real-microphone`（先核对所选设备和同意），系统声音须显式 `--selftest-real-system-audio`；未执行的物理采集必须列为未验证。屏幕源只请求 ID，缩略图尺寸为零。当前证据见 [Mac beta.8 验证](../../docs/MAC-beta.8-VERIFICATION.md)。
+
+
+## beta.9：课堂模式、详细纪要与导出范围
+
+顶部使用场景选择 `meeting` / `class`，纪要详细度选择 `standard` / `detailed`（新生成默认详细）。`Meeting.snapshot()`、`store.saveMeeting()` / `restore()` 保存 mode、notesDetail、summaryMode；旧文档缺字段时按会议/详细处理，旧摘要的来源按会议处理，不重写或删除历史输出。新纪要在 JSON 内记录生成时 mode/notesDetail，并可包含 topics、keyConcepts、examples、reviewQuestions；旧字段兼容，UI/Markdown 同步显示额外内容、章节、决策依据与风险影响。
+
+REST 创建和 `PATCH /api/meetings/:id`、WS new/start/config-patch 接入选项；非法枚举被拒绝（恢复旧文档时容错归一化）。切模式不自动调用模型、不清空原摘要；若已有摘要属于旧场景，自动摘要暂缓，用户手动总结时一次从完整转写重建，之后恢复增量。请求完成时校验上下文/选项，防止旧结果覆盖新选择；原输出预算摘要4000/纪要16000及重试计数不变。
+
+MD 导出增加 includeTranscript=0|1，省略参数保留旧 API 全文行为；UI 默认为不勾选全文，并将选择传给原生/浏览器完整阅读器，PDF/打印沿用同一文档。选项仅改变转写附录，不改变本地记录，也不改变 TXT/VTT/JSON。浏览器当前 origin 的偏好保存在 babel-note-options-v1 和 babel-md-include-transcript，Electron 随机端口间不承诺全局偏好恢复；记录本身始终保存场景和详细度。新增 `npm run test:notes`，纳入12组离线套件；实际 Electron 覆盖课堂内容与导出两种范围。见 [功能说明](../../docs/CLASSROOM_NOTES.md)。
+
+## 句子重组与整场说话人校正（2026-11-04）
+
+用户历史（13 场、1050 段）显示两个问题：66% 的段落结尾没有句末标点、71% 的下一段在 300 ms 内紧接着开始（几乎都是同一人），说明大多数段落是被「最长单句」硬切出来的；用 Deepgram 的 3 场会议里 90% 以上被标成说话人1，因为每句单独请求，Deepgram 每次请求都从 0 号重新编号，跨请求不连贯。
+
+**句子重组**（`lib/sentences.mjs`，`Meeting.addText()`）：识别结果先按句末标点（`。！？!?…`、空白或末尾前的 `.`，含后随引号括号）切句；完整句按约 80 字分组，句子不拆；最后的未完句单独成段并标 `open: true`。下一段识别结果若与它同一说话人且间隔 ≤1.5 s，就把开头接到这句上（`segment-update` 带 `text/end/open`），句子完整或累计 240 字后定稿。未完句在换人、间隔过长、暂停、结束、导入完成、启动恢复时一律定稿；`open` 只在未完成时出现，旧会议没有该字段。时间戳按字数在一次识别结果内线性分配。只有定稿的句子进入翻译队列，翻译请求附带前两句作为「仅供理解」的上下文（`prompts.translateMessages({context})`）。实时和导入都经过 `commitSegment()`，行为一致。对历史转写离线回放：结尾无句末标点 690 → 219 段，超过 120 字 378 → 206 段，文本不变。
+
+**整场校正说话人**（`lib/diarize.mjs`，`Meeting.diarizeRecording()`）：会议结束且有音频时，把整段录音（mp3/wav）发送给 `config.speakers.provider`（默认 `deepgram`，必须是已启用、有密钥的 deepgram 类引擎）一次，按词的时间重叠给每段分配多数说话人，无词覆盖的段沿用前一段；按首次出现顺序命名说话人1、2…，替换 `speakers` 表。文字与翻译不变。校正前的标注存入 `speakerBackup {at, speakers, labels:[[index,speaker]]}`（落盘，`snapshot()` 只给前端 `{at}`），`undoDiarization()` 恢复并清空。费用计入 `stats.asr*`。`config.speakers.autoDiarize`（默认 false）为真时，录音结束（`finishRecording`，在生成纪要之前）和导入完成后自动执行，失败只提示并保留原标注。界面：转写区「整场校正说话人」按钮（确认框显示按时长估算的费用）和「撤销校正」，设置中「说话人校正」开关。
+
+已知限制：校正不会把一段拆给两个人（句子重组后段落较短，影响有限）；Deepgram 对中文/日语的分离质量和长录音上传尚未用真实账号验证；Groq/MiMo 实时路径的说话人仍靠停顿推断，需要校正才能区分。验证：`npm run test:sentences`（离线，纳入 14 组离线套件），浏览器中用本机模拟 Deepgram 端点走通「校正 → 2 位说话人 → 撤销」。
+
+## 设置页：快速设置与高级设置（2026-11-04）
+
+设置抽屉分为三个标签页：「快速设置」「高级设置」「外观」。上次打开的标签页存在 localStorage `babel-settings-tab`（不可用时回到快速设置）；配置 schema 没有变化，旧配置原样可用。
+
+- **快速设置**只做三件事：语音识别、文本模型、说话人区分（可选）。每个内置/自定义引擎一张卡片：说明、价格、状态徽章（未启用 / 需要密钥 / 已就绪）、「用于：」实际服务的语言或任务。粘贴 API Key 点「保存并启用」= `POST /api/credentials` + 启用该引擎；「测试连接」复用 `/api/providers/:category/:name/models`，部分服务没有模型列表，失败文案会说明不一定是密钥错误。顶部总览按当前识别语言显示能否开始录音、中/英/日各由哪个引擎转写、文本任务是否可用。
+- **自动分配**由 `public/quick-setup.js` 的纯函数决定（浏览器和离线测试共用）：`effectiveAsr()` 与服务端 `pickAsrProvider()` 规则一致（强制引擎 → 语言路由 → 配置顺序中第一个可用引擎）；启用/停用语音引擎后 `routeRepairs()` 只把指向不可用引擎的语言路由改成实际会使用的引擎，可用的路由不改。DeepSeek 就绪且有任务不可用时，自动套用默认分工（flash 做摘要/翻译/问答，v4-pro 做纪要）；其他文本服务用「所有任务改用此服务」并选一个模型。
+- **高级设置**保留全部原有选项，按「语音识别引擎（含按语言路由）」「文本模型与任务」「实时识别节奏」「摘要与用量」「说话人校正」分组折叠，展开状态在本次会话中保留。数值、任务模型和开关改动后自动保存（失败或数值无效时在组内提示，不重建抽屉，焦点不丢）；引擎连接设置、密钥、新增/移除引擎仍需点击按钮。
+- 验证：`npm run test:quick-setup`（已加入 `test:offline`）穷举引擎启用 × 密钥 × 强制引擎组合，断言 `effectiveAsr` 与 `pickAsrProvider` 一致、修复后的路由不改变实际引擎，以及任务分配能通过 `saveConfig` 校验。
+
+## 操作流程：结束录音、下一步与说话人修正（2026-11-04）
+
+- **顶栏**只留导航：会议标题、计时、状态、引擎、历史、导出、阅读器、设置。明暗切换按钮移除（在「设置 → 外观」里调），界面语言移到底部状态栏；引擎标签在窄窗口里先缩短，设置按钮不会被挤出屏幕。
+- **录音区**常用项（识别语言、翻译、麦克风、测试麦克风、电脑声音）直接显示；使用场景、纪要详细度、「结束后自动生成纪要」和刷新设备收在「更多选项」里。
+- **结束录音**：按钮改为「结束录音」，WS `stop` 带 `minutes`（取自「结束后自动生成纪要」，存在 localStorage `babel-auto-minutes`，默认开启，保持原有行为）。录音或导入从 recording/paused/processing 变为 stopped 后，转写区上方出现「下一步」卡片：生成/查看纪要（生成中显示进度；失败后可重试）、整场校正说话人（可用时）、导出、新建会议、关闭。打开历史会议不显示该卡片。
+- **导出**集中到顶栏「导出」菜单（Markdown 及是否包含转写全文、纯文本、VTT、双语字幕、JSON）；没有打开会议时只显示提示。
+- **说话人**：点击句子前的说话人打开就地菜单（不再用 Electron 不支持的 `prompt()`）：改到已有说话人、设为新说话人，或给该说话人全部改名；改成已有名字会合并，先确认。统计页的说话人列表显示句数，可改名，也可「合并到…」其他说话人。服务端 `Meeting.renameSpeaker()` 合并时去掉重复的说话人条目，`setSegmentSpeaker()` 只改一句。整场校正的撤销会恢复校正前的标注，覆盖之后的手动修改。
+- **错误横幅**：error/warn 文案涉及密钥、引擎、模型服务或 401/403 时，附「去设置」按钮，直接打开快速设置。
+- 未做：会议历史改为左侧栏（仍是抽屉）。验证：`test-sentences` 新增单句改说话人、改名与合并的用例；桌面自检 74/74；浏览器中用临时数据目录检查了顶栏、更多选项、导出菜单、说话人菜单与合并、下一步卡片的各状态（通过模拟 WS 事件），以及 375px 宽度。真实录音结束到纪要生成的完整流程需要配置好的服务再测一次。
+
+## 2026-11 代码审查修复（数据安全与健壮性）
+
+以下是新的不变量，修改相关代码时必须保持：
+
+- **设置文件原子写入**：`config.json`、`credentials.json` 经 `lib/atomic-file.mjs` 先写临时文件再 rename，权限 `0600`（POSIX）。读不出来的文件会被改名为 `*.corrupt-<时间>` 保留，**绝不能**被下一次保存覆盖；`setLocalCred` 返回 `warning` 告知用户其他密钥需要重填。
+- **明文 HTTP 仅限本机/局域网**：`assertSafeEndpoint()`（`lib/config.mjs`）在保存配置、创建 ASR 实例、解析 LLM 角色和读取模型列表时检查。允许：HTTPS；或 HTTP 到 loopback、RFC1918、链路本地、CGNAT、`.local`/`.lan`、单段主机名、IPv6 ULA/链路本地。公网明文地址会报错而不是静默发送密钥。
+- **实时参数**：`minNewMs` 500–30000，`vadThreshold` 为 (0, 0.2] 的数字。
+- **浏览器录音断线缓冲**：`public/app.js` 的 `sendAudio()` 在 WebSocket 重连期间最多缓存约 5 分钟音频，重连后按顺序补发；超出部分会提示丢失秒数。6 次重连失败后停止采集并明确提示，不再假装仍在录音。可选浏览器检查：`node scripts/ui-check-reconnect.cjs`（需要 Playwright）。
+- **结束录音**：`finishRecording()` 任何步骤失败最终都落到 `stopped` 并保存；`flushTranslation(true)` 会等待正在进行的批次后继续清空队列（`translating` 现在是进行中的 Promise）。音频写入出错会发出 `audioLost: true` 的错误事件，WAV 头按实际文件大小修补。
+- **AI 分角色**按 150 段分批请求，避免长会议输出截断。
+- **服务端**：上传直接流式写盘（不再整块读入内存）；导入失败也会保存 `stopped` 状态；Range 支持 `bytes=-N` 并按 RFC 截断结尾；`format=srt` 返回真正的 SRT；下载文件名使用 `filename*=UTF-8''`；奇数字节的音频帧丢弃末尾 1 字节；空闲 30 分钟、已结束且无人连接的会议对象从内存中释放（下次访问从磁盘重新载入）。
+- **WebSocket**：握手 `head` 中的字节不再丢弃；分片消息整体也受 64 MB 上限。
+- **LLM 重试**：429/5xx 重试时遵守 `Retry-After`（最多 30 秒）。
+- **Electron**：麦克风/剪贴板/通知权限只授予本机服务同源页面；主窗口禁止导航到其他来源（外部链接交给系统浏览器）。
+- **崩溃恢复锁** `data/tmp/recorder.pid` 在正常退出时删除，避免 PID 复用导致恢复被长期跳过。
+
+验证：`npm run test:offline`（16 套件，新增 `test:review-fixes`）、`desktop:test` Electron 自检 73/73（Linux/Xvfb）、`scripts/ui-check-reconnect.cjs` 浏览器断线测试。Windows/macOS 上的打包与托盘行为仍需在对应系统验证，见 `docs/HANDOFF_2026-11_REVIEW_FIXES.md`。

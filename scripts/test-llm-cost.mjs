@@ -8,7 +8,6 @@ import { join, resolve, sep } from 'node:path';
 const temp = mkdtempSync(join(tmpdir(), 'babel-cost-'));
 process.env.MIAOJI_DATA_DIR = temp;
 process.env.MIAOJI_CONFIG_PATH = join(temp, 'config.json');
-process.env.DSH_HOME = join(temp, 'dsh');
 const originalFetch = globalThis.fetch;
 try {
   const { DEFAULT_CONFIG, loadConfig, saveConfig } = await import('../lib/config.mjs');

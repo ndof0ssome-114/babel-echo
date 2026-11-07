@@ -60,9 +60,11 @@ integrated.scheduleTranslate = () => {};
 for (let second = 0; second < 13; second++) integrated.ingest(speech);
 for (let i = 0; i < 7; i++) integrated.ingest(silent);
 await integrated.whenIdle();
-assert.deepEqual(integrated.segments.map((segment) => segment.text), ['前半的内容继续说明', '后半的内容']);
-assert.ok(integrated.segments[1].start >= integrated.segments[0].end);
-console.log('PASS queued final ASR jobs retain the sentence and remove duplicated overlap text');
+// The unfinished sentence continues across the forced split as one segment,
+// without the text recognised twice from the carried-over audio.
+assert.deepEqual(integrated.segments.map((segment) => segment.text), ['前半的内容继续说明后半的内容']);
+assert.ok(integrated.segments[0].end > 13000);
+console.log('PASS queued final ASR jobs retain the sentence, join it across the split and remove duplicated overlap text');
 
 assert.equal(trimRepeatedPrefix('本日はよろしくお願いします', 'お願いします。次の議題です'), '次の議題です');
 assert.equal(trimRepeatedPrefix('We will discuss the budget', 'the budget and deadline'), 'and deadline');

@@ -7,6 +7,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('miaojiDesktop', {
   isDesktop: true,
+  openMarkdownReader: (document) => ipcRenderer.invoke('babel:reader-open', document),
   platform: process.platform,
 
   /** Main -> renderer: global shortcut or tray asked to toggle recording. */
@@ -26,6 +27,8 @@ contextBridge.exposeInMainWorld('miaojiDesktop', {
 
   getMicrophonePreference: () => ipcRenderer.invoke('miaoji:microphone-get'),
   setMicrophonePreference: (preference) => ipcRenderer.invoke('miaoji:microphone-set', preference),
+  getAppearancePreference: () => ipcRenderer.invoke('miaoji:appearance-get'),
+  setAppearancePreference: (preference) => ipcRenderer.invoke('miaoji:appearance-set', preference),
 
   notify: (title, body) => ipcRenderer.send('miaoji:notify', { title, body }),
 

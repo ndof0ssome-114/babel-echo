@@ -3,9 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <title>巴别回声 — AI 会议记录工作台</title>
 <link rel="icon" type="image/png" href="/brand-icon.png">
 <link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/appearance.css">
+<link rel="stylesheet" href="/vendor/markdown/katex.min.css">
+<link rel="stylesheet" href="/markdown.css">
+<script type="module" src="/appearance.js"></script>
 </head>
 <body>
 <div id="app">
@@ -27,10 +32,22 @@
     <span class="grow"></span>
 
     <span class="chip" id="engineChip" title="当前语音识别引擎">未就绪</span>
-    <label class="ui-language" title="界面语言"><span data-i18n="界面语言">界面语言</span><select id="uiLanguage" aria-label="界面语言"><option value="zh">简体中文</option><option value="ja">日本語</option><option value="en">English</option></select></label>
     <button class="btn ghost" id="btnHistory" data-i18n="历史">历史</button>
+    <details class="menu" id="exportMenu">
+      <summary class="btn ghost" data-i18n="导出">导出</summary>
+      <div class="menu-panel" role="menu">
+        <a href="#" role="menuitem" data-export="md">Markdown</a>
+        <label class="export-option"><input type="checkbox" id="includeTranscript"><span data-i18n="Markdown 包含转写全文">Markdown 包含转写全文</span></label>
+        <a href="#" role="menuitem" data-export="txt" data-i18n="纯文本">纯文本</a>
+        <a href="#" role="menuitem" data-export="srt" data-i18n="字幕 SRT">字幕 SRT</a>
+        <a href="#" role="menuitem" data-export="vtt" data-i18n="字幕 VTT">字幕 VTT</a>
+        <a href="#" role="menuitem" data-export="vtt&amp;translated=1" data-i18n="双语字幕">双语字幕</a>
+        <a href="#" role="menuitem" data-export="json">JSON</a>
+        <p class="muted small" id="exportEmpty" data-i18n="打开或录制一场会议后可以导出。">打开或录制一场会议后可以导出。</p>
+      </div>
+    </details>
+    <button class="btn ghost" id="btnReader" data-i18n="阅读器">阅读器</button>
     <button class="btn ghost" id="btnSettings" data-i18n="设置">设置</button>
-    <button class="btn ghost icon" id="btnTheme" title="切换主题">◐</button>
   </header>
 
   <section class="controls" aria-label="录音控制">
@@ -38,7 +55,7 @@
       <div class="capture-actions-primary">
         <button class="btn primary" id="btnRecord" data-i18n="开始录音">开始录音</button>
         <button class="btn" id="btnPause" disabled data-i18n="暂停">暂停</button>
-        <button class="btn danger" id="btnStop" disabled data-i18n="结束并生成纪要">结束并生成纪要</button>
+        <button class="btn danger" id="btnStop" disabled data-i18n="结束录音">结束录音</button>
       </div>
       <span class="capture-actions-divider" aria-hidden="true"></span>
       <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
@@ -79,15 +96,21 @@
         <option value="default" data-i18n="系统默认麦克风">系统默认麦克风</option>
       </select>
     </label>
-    <button class="btn tiny" id="btnRefreshMicrophones" title="授权并刷新麦克风列表" data-i18n="刷新设备">刷新设备</button>
     <button class="btn tiny" id="btnTestMicrophone" title="录音前检查所选麦克风是否有声音" data-i18n="测试麦克风">测试麦克风</button>
     <label class="field" id="systemAudioField" title="同时录入电脑扬声器正在播放的声音"><input type="checkbox" id="includeSystemAudio"> <span data-i18n="同时录电脑声音">同时录电脑声音</span></label>
+    <button class="btn tiny ghost" id="btnMoreOptions" aria-expanded="false" aria-controls="moreOptions" data-i18n="更多选项">更多选项</button>
     <span class="muted small" id="microphoneStatus" role="status"></span>
-
+    <div class="more-options" id="moreOptions" hidden>
+      <label class="field"><span data-i18n="使用场景">使用场景</span><select id="noteMode" aria-label="使用场景"><option value="meeting" data-i18n="会议">会议</option><option value="class" data-i18n="上课">上课</option></select></label>
+      <label class="field"><span data-i18n="纪要详细度">纪要详细度</span><select id="notesDetail" aria-label="纪要详细度"><option value="detailed" data-i18n="详细">详细</option><option value="standard" data-i18n="标准">标准</option></select></label>
+      <label class="field" title="结束录音后自动生成纪要"><input type="checkbox" id="autoMinutes" checked> <span data-i18n="结束后自动生成纪要">结束后自动生成纪要</span></label>
+      <button class="btn tiny" id="btnRefreshMicrophones" title="授权并刷新麦克风列表" data-i18n="刷新设备">刷新设备</button>
+    </div>
     </div>
   </section>
 
   <div class="banner" id="banner" role="status" aria-live="polite" hidden></div>
+  <section class="next-step" id="nextStep" aria-live="polite" hidden></section>
 
   <main class="layout">
 
@@ -97,6 +120,8 @@
         <span class="muted" id="segCount">0 条</span>
         <span class="grow"></span>
         <button class="btn tiny" id="btnResplitHead" title="用语言线索推断不同说话人" data-i18n="AI 分角色">AI 分角色</button>
+        <button class="btn tiny" id="btnDiarize" title="把整段录音交给 Deepgram 重新区分说话人（额外计费一次）" data-i18n="整场校正说话人" data-i18n-title="把整段录音交给 Deepgram 重新区分说话人（额外计费一次）" hidden>整场校正说话人</button>
+        <button class="btn tiny" id="btnUndoDiarize" title="恢复校正前的说话人标注" data-i18n="撤销校正" data-i18n-title="恢复校正前的说话人标注" hidden>撤销校正</button>
         <span class="muted small" id="levelHint"></span>
       </div>
 
@@ -129,6 +154,7 @@
             <span class="muted small" id="summaryMeta" data-i18n="尚未生成">尚未生成</span>
             <span class="grow"></span>
             <button class="btn tiny" id="btnResummarize" data-i18n="重新总结">重新总结</button>
+            <button class="btn tiny" id="btnReadSummary" data-i18n="阅读／打印">阅读／打印</button>
           </div>
           <div class="markdown" id="summaryBody"><p class="muted" data-i18n="会议开始后，摘要会每隔一段时间自动刷新。">会议开始后，摘要会每隔一段时间自动刷新。</p></div>
         </div>
@@ -138,6 +164,7 @@
             <span class="muted small" id="minutesMeta" data-i18n="尚未生成">尚未生成</span>
             <span class="grow"></span>
             <button class="btn tiny" id="btnMinutes" data-i18n="生成纪要">生成纪要</button>
+            <button class="btn tiny" id="btnReadMinutes" data-i18n="阅读／打印">阅读／打印</button>
           </div>
           <div id="minutesBody"><p class="muted" data-i18n="结束录音时会自动生成结构化纪要，也可以随时手动生成。">结束录音时会自动生成结构化纪要，也可以随时手动生成。</p></div>
         </div>
@@ -166,14 +193,7 @@
   <footer class="statusbar">
     <span id="connState" class="dot" data-state="off" data-i18n="连接中…">连接中…</span>
     <span class="grow"></span>
-    <span class="muted small" id="exportBar">
-      <span data-i18n="导出：">导出：</span>
-      <a href="#" data-export="md">Markdown</a>
-      <a href="#" data-export="vtt" data-i18n="字幕 VTT">字幕 VTT</a>
-      <a href="#" data-export="vtt&translated=1" data-i18n="双语字幕">双语字幕</a>
-      <a href="#" data-export="txt" data-i18n="纯文本">纯文本</a>
-      <a href="#" data-export="json">JSON</a>
-    </span>
+    <label class="ui-language" title="界面语言"><span data-i18n="界面语言">界面语言</span><select id="uiLanguage" aria-label="界面语言"><option value="zh">简体中文</option><option value="ja">日本語</option><option value="en">English</option></select></label>
   </footer>
 </div>
 

@@ -307,6 +307,9 @@ button, input, select { font: inherit; color: inherit; }
 
 .seg-body { min-width: 0; }
 .seg-text { white-space: pre-wrap; word-break: break-word; }
+/* A sentence that may still continue: dimmed until it is complete and translated. */
+.seg.open .seg-text { opacity: .78; }
+.settings-check { display: flex; align-items: center; gap: 6px; }
 
 .seg-tr {
   margin-top: 4px;
@@ -876,3 +879,96 @@ body {
   .pill[data-state="recording"]::before, .seg.live .seg-text::after { animation: none; }
   .transcript { scroll-behavior: auto; }
 }
+
+/* Export scope stays beside the Markdown link and also applies to full reading/printing. */
+#exportBar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; justify-content: flex-end; }
+.export-option { display: inline-flex; align-items: center; gap: 5px; margin-right: 10px; cursor: pointer; }
+.export-option input { accent-color: var(--accent); }
+.minutes p { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Settings: quick / advanced / appearance tabs. */
+.settings-tabs { display: flex; gap: 4px; padding: 3px; margin: 0 0 18px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2); width: fit-content; max-width: 100%; }
+.settings-tab { border: 0; background: transparent; color: var(--text-2); padding: 7px 16px; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
+.settings-tab:hover { color: var(--text); }
+.settings-tab[aria-selected="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.quick-overview { padding: 14px 16px; margin: 0 0 20px; border: 1px solid var(--border); border-left: 4px solid var(--ok); border-radius: 11px; background: var(--surface-2); }
+.quick-overview[data-level="warn"] { border-left-color: var(--warn); }
+.quick-overview[data-level="miss"] { border-left-color: var(--danger, #c0392b); }
+.quick-overview > strong { font-size: 14px; }
+.quick-overview dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 9px 0 0; font-size: 12px; }
+.quick-overview dt { color: var(--text-3); }
+.quick-overview dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.quick-card { padding: 12px 14px; }
+.quick-card-head { display: flex; gap: 11px; align-items: center; }
+.quick-card .key-row { padding: 10px 0 0; }
+.quick-card .key-row input { min-width: 0; }
+.quick-card .key-row button { flex: none; }
+.quick-card .provider-heading small { white-space: normal; }
+.quick-card-head .badge { flex: none; white-space: nowrap; }
+.quick-card .settings-actions { margin: 10px 0 0; flex-wrap: wrap; }
+.quick-card .settings-actions:empty { display: none; }
+.quick-card .settings-check { padding: 0; }
+.quick-card > .settings-note { display: block; margin: 6px 0 0; }
+.quick-used { margin-top: 6px; font-size: 12px; color: var(--ok); }
+.quick-result:empty { display: none; }
+.quick-result[data-state="error"], .autosave-state[data-state="error"] { color: var(--danger, #c0392b); }
+.quick-result[data-state="ok"], .autosave-state[data-state="ok"] { color: var(--ok); }
+.quick-model { margin-top: 10px; }
+.quick-footer { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 0 0; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
+.badge.off { background: var(--surface-2); color: var(--text-3); }
+.settings-group { border: 1px solid var(--border); border-radius: 11px; padding: 0 14px; background: var(--surface); }
+.settings-group > summary { cursor: pointer; list-style: none; padding: 13px 0; margin: 0; }
+.settings-group > summary::-webkit-details-marker { display: none; }
+.settings-group > summary h4::before { content: '▸'; display: inline-block; width: 1.2em; color: var(--text-3); transition: transform .15s; }
+.settings-group[open] > summary h4::before { transform: rotate(90deg); }
+.settings-group-body { padding: 0 0 12px; }
+.settings-group { margin-bottom: 10px; }
+.settings-subhead { margin: 16px 0 8px; font-size: 13px; }
+.autosave-state { display: block; min-height: 1.4em; margin: 0; }
+
+/* Workflow: export menu, more options, next-step card, speaker menu. */
+.banner:not([hidden]) { display: flex; align-items: center; gap: 12px; }
+.banner > span { flex: 1 1 auto; min-width: 0; }
+.banner > .btn { flex: none; }
+.menu { position: relative; }
+.menu > summary { list-style: none; cursor: pointer; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary::after { content: ' ▾'; font-size: 10px; opacity: .7; }
+.menu-panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 220px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 11px; box-shadow: var(--shadow);
+}
+.menu-panel a { padding: 7px 10px; border-radius: 7px; color: var(--text); text-decoration: none; font-size: 13px; }
+.menu-panel a:hover, .menu-panel a:focus-visible { background: var(--accent-soft); outline: none; }
+.menu-panel .export-option { padding: 0 10px 6px; margin: 0; font-size: 11px; color: var(--text-3); }
+.menu-panel p { margin: 6px 10px; }
+.more-options { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; flex-basis: 100%; padding-top: 4px; }
+.more-options .field { display: flex; flex-direction: column; gap: 4px; }
+.more-options .field:has(input[type="checkbox"]) { flex-direction: row; align-items: center; height: 35px; font-size: 12px; }
+.next-step {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 10px 18px 0; padding: 12px 16px;
+  border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 11px; background: var(--surface-2);
+}
+.next-step[hidden] { display: none; }
+.next-step-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.next-step-text strong { font-size: 14px; }
+.next-step-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.seg-speaker:hover, .seg-speaker:focus-visible { text-decoration: underline; outline: none; }
+.speaker-menu {
+  position: fixed; z-index: 60; display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); font-size: 12px;
+}
+.speaker-menu-title { color: var(--text-3); font-size: 11px; }
+.speaker-menu-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.speaker-menu-row { display: flex; gap: 6px; }
+.speaker-menu-row input { flex: 1 1 auto; min-width: 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: 12px; }
+.speaker-menu-row .btn { flex: none; }
+.speaker-row select { flex: none; max-width: 40%; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; }
+.speaker-row > span { flex: none; }
+.statusbar .ui-language { margin-left: auto; }
+/* Popovers sit over text, so they need an opaque base under the glass surface. */
+.speaker-menu, .menu-panel { background-color: var(--bg); background-image: linear-gradient(var(--surface), var(--surface)); }
+/* The engine chip yields space first so the top bar never pushes Settings off screen. */
+.topbar #engineChip { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar > .btn, .topbar > .menu { flex: none; }

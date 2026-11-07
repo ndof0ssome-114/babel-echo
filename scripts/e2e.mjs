@@ -10,10 +10,13 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { useServerToken, socketUrl } from './server-auth.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, '..', '.probe', 'fixture', 'meeting.wav');
 const BASE = process.argv[2] || 'http://127.0.0.1:8777';
+// The server must be started with the same MIAOJI_ACCESS_TOKEN as this script.
+const TOKEN = useServerToken(BASE);
 const SPEED = Number(process.env.E2E_SPEED || 5);
 
 const results = [];
@@ -59,7 +62,7 @@ async function main() {
 
   // 2. open the realtime channel
   const wsUrl = BASE.replace('http', 'ws') + '/ws?meeting=' + id;
-  const ws = new WebSocket(wsUrl);
+  const ws = new WebSocket(socketUrl(wsUrl, TOKEN));
   ws.binaryType = 'arraybuffer';
 
   const events = [];
